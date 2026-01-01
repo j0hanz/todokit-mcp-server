@@ -49,7 +49,7 @@ function noop(): void {
   // Intentionally empty
 }
 
-export function getTodoFilePath(): string {
+function getTodoFilePath(): string {
   const override = process.env.TODOKIT_TODO_FILE?.trim();
   if (override) {
     return resolve(override);

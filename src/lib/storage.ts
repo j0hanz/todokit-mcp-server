@@ -66,12 +66,8 @@ function hasChanges(current: Todo, updates: TodoUpdate): boolean {
   return false;
 }
 
-function getAllTodos(): Promise<Todo[]> {
-  return readTodos();
-}
-
 export async function getTodos(filters?: TodoFilters): Promise<Todo[]> {
-  const todos = await getAllTodos();
+  const todos = await readTodos();
   return filters ? filterTodos(todos, filters) : todos;
 }
 
