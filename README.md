@@ -17,12 +17,12 @@ An MCP server for Todokit, a task management and productivity tool with JSON sto
 ## Features
 
 - Task management: add, update, complete/reopen, and delete todos.
-- Batch operations: add multiple todos in one call.
+- Batch operations: add multiple todos and bulk delete with filters.
 - Rich filtering: status, priority, tags, due dates, and free-text search.
 - Tagging: tags are normalized (trimmed, lowercase, unique) and can be added or removed.
-- Safe deletion: dry-run delete returns previews for ambiguous matches.
+- Safe deletion: dry-run previews before deleting; bulk delete defaults to a safety limit.
 - JSON persistence with queued writes and atomic file writes.
-- List summaries with counts (pending, completed, overdue).
+- List summaries with counts (pending, completed, overdue) and pagination metadata.
 
 ## Quick Start
 
@@ -66,7 +66,7 @@ npm start
 
 ### Storage path
 
-By default, todos are stored in `todos.json` next to the server package (the project root when running from source). To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path ending with `.json`. The directory is created as needed; if the file does not exist, the server starts with an empty list.
+By default, todos are stored in `todos.json` next to the server package (the project root when running from source). To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path ending with `.json`. Relative paths resolve from the current working directory. The directory is created as needed; if the file does not exist, the server starts with an empty list.
 
 Examples:
 
@@ -84,6 +84,7 @@ npx -y @j0hanz/todokit-mcp@latest
 ## Tools
 
 All tools return a JSON payload in both `content` (stringified) and `structuredContent`.
+Inputs are validated with strict Zod schemas, so unknown fields are rejected.
 
 Success payload:
 
@@ -162,6 +163,7 @@ Result fields:
 - `counts` (`total`, `pending`, `completed`, `overdue`)
 - `limit`
 - `offset`
+- `hasMore` (true if more results are available after this page)
 
 Notes:
 
@@ -271,11 +273,16 @@ A todo item has the following shape:
   "priority": "low|normal|high",
   "dueDate": "YYYY-MM-DD?",
   "tags": ["string"],
-  "createdAt": "ISO timestamp",
-  "updatedAt": "ISO timestamp?",
-  "completedAt": "ISO timestamp?"
+  "createdAt": "ISO timestamp with offset",
+  "updatedAt": "ISO timestamp with offset?",
+  "completedAt": "ISO timestamp with offset?"
 }
 ```
+
+Notes:
+
+- `dueDate` uses `YYYY-MM-DD` (date only).
+- `createdAt`, `updatedAt`, and `completedAt` are ISO 8601 timestamps with offset (e.g., `2025-02-28T10:30:00Z`).
 
 ## Client Configuration
 
@@ -368,7 +375,7 @@ docs/        # Assets (logo)
 
 ## Contributing
 
-Contributions are welcome. Please run `npm run format`, `npm run lint`, `npm run type-check`, and `npm run build` before opening a PR.
+Contributions are welcome. Please run `npm run format`, `npm run lint`, `npm run type-check`, `npm run build`, `npm test`, `npm run test:coverage`, and `npm run dup-check` before opening a PR.
 
 ## License
 
