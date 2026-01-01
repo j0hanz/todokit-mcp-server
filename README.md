@@ -225,6 +225,35 @@ Result fields:
 - `dryRun` (when dryRun is true)
 - `matches`, `totalMatches` (dry-run + multiple matches)
 
+### delete_todos
+
+Delete multiple todos matching filters. At least one filter is required; defaults to limit=10 for safety.
+
+| Parameter | Type    | Required | Default | Description                                    |
+| :-------- | :------ | :------- | :------ | :--------------------------------------------- |
+| status    | string  | No       | -       | Filter by status: pending, completed, all      |
+| priority  | string  | No       | -       | Filter by priority: low, normal, high          |
+| tag       | string  | No       | -       | Filter by tag                                  |
+| dueBefore | string  | No       | -       | Delete todos due before this date (YYYY-MM-DD) |
+| dueAfter  | string  | No       | -       | Delete todos due after this date (YYYY-MM-DD)  |
+| query     | string  | No       | -       | Search text filter (1-200 chars)               |
+| dryRun    | boolean | No       | false   | Preview deletion without removing data         |
+| limit     | number  | No       | 10      | Max items to delete (1-100, safety limit)      |
+
+Notes:
+
+- At least one filter (status, priority, tag, dueBefore, dueAfter, query) is required.
+- The default limit of 10 prevents accidental mass deletions.
+
+Result fields:
+
+- `deletedIds` (array)
+- `summary`
+- `totalMatched`
+- `matches` (dry-run only, array of previews)
+- `dryRun` (when dryRun is true)
+- `nextActions` (only when not dryRun)
+
 ## Data Model
 
 A todo item has the following shape:
