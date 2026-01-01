@@ -2,97 +2,122 @@
 
 ## Project Overview
 
-- Minimal Model Context Protocol (MCP) server for managing a to-do list (add/list/complete/delete).
-- Tech stack: TypeScript (ESM, `module: NodeNext`) + Node.js `>=20` + `@modelcontextprotocol/sdk` + Zod.
-- Persistence: stores todos in `todos.json` at the repository root (created on first write).
+- **What**: MCP (Model Context Protocol) server for Todokit — a task management tool with JSON storage
+- **Package**: `@j0hanz/todokit-mcp` on npm
+- **Stack**: TypeScript, Node.js, Zod (validation), MCP SDK (`@modelcontextprotocol/sdk`)
+- **Transport**: stdio (no HTTP endpoint)
 
 ## Repo Map / Structure
 
-- `src/`: TypeScript source
-  - `src/index.ts`: MCP server entrypoint (stdio transport)
-  - `src/tools/`: MCP tool registrations
-    - `add_todo`, `list_todos`, `complete_todo`, `delete_todo`
-  - `src/lib/`: shared logic
-    - `storage.ts`: JSON file persistence + caching/serialization
-    - `types.ts`: `Todo` type
-    - `errors.ts`: standard MCP tool error responses
-  - `src/schemas/`: Zod input/output schemas used by tools
-- `dist/`: build output from `tsc` (`npm run build`)
-- `.github/instructions/`: repo-specific rules for MCP server implementation
+- `src/` — Source code (TypeScript)
+  - `index.ts` — MCP server entrypoint (stdio transport, signal handlers)
+  - `tools/` — Tool registrations (`add_todo`, `list_todos`, `update_todo`, etc.)
+  - `schemas/` — Zod input/output schemas
+  - `lib/` — Storage, matching, error classes, shared helpers
+- `dist/` — Build output (generated, gitignored)
+- `tests/` — Unit tests (`*.test.ts`)
+- `benchmark/` — Performance benchmarks (`bench.ts`)
+- `docs/` — Assets (logo)
+- `.github/workflows/` — CI/CD (publish to npm on release)
 
 ## Setup & Environment
 
-- Node.js: `>=20.0.0` (see `package.json#engines`)
-- Install deps: `npm install`
-- Package manager: `npm` (lockfile: `package-lock.json`)
+- **Install deps**: `npm install`
+- **Node version**: `>=20.0.0` (see `engines` in package.json)
+- **Env config**: `TODOKIT_TODO_FILE` — absolute or relative path to `todos.json` (default: project root)
+- **No additional services required**
 
 ## Development Workflow
 
-- Format: `npm run format`
-- Lint: `npm run lint`
-- Type-check (no emit): `npm run type-check`
-- Dev (watch): `npm run dev`
-- Build (emit to `dist/`): `npm run build`
-- Run built server: `npm start`
+- **Dev mode** (watch): `npm run dev`
+- **Build**: `npm run build`
+- **Start** (production): `npm start`
+- **Inspector**: `npm run inspector` then select `node dist/index.js`
 
 ## Testing
 
-- No `test` script is defined in `package.json`.
-- Manual verification (stdio MCP inspector) is documented in `.github/instructions/typescript-mcp-server.instructions.md`:
-  - `npx @modelcontextprotocol/inspector node dist/index.js`
+- **All tests**: `npm test`
+- **Coverage**: `npm run test:coverage`
+- **Watch mode**: Not provided; re-run `npm test` manually
+- **Test pattern**: `tests/*.test.ts`
+- **Runner**: Node.js built-in test runner (`node --test`) via tsx
 
 ## Code Style & Conventions
 
-- Language/runtime:
-  - TypeScript `strict: true` with `noUncheckedIndexedAccess: true`
-  - ESM with NodeNext resolution (`"type": "module"`)
-- Imports:
-  - Use `.js` extensions for local imports (example: `./tools/index.js`).
-  - Prefer type-only imports (example: `import type { McpServer } ...`).
-- ESLint: `npm run lint` (configured in `eslint.config.mjs`)
-  - Notable rules: no `any`, explicit return types for exported functions, no floating promises, prefer `const`.
-- Prettier: `npm run format` (configured in `.prettierrc`)
-  - Import sorting via `@trivago/prettier-plugin-sort-imports`.
+### Language & Compilation
+
+- TypeScript `^5.9`, target ES2022, module NodeNext
+- Strict mode enabled (`strict: true`)
+- `noUncheckedIndexedAccess`, `noImplicitOverride`, `useUnknownInCatchVariables`
+
+### Lint: `npm run lint`
+
+- ESLint with `typescript-eslint` strict + stylistic presets
+- `no-explicit-any`: error
+- `consistent-type-imports` / `consistent-type-exports`: inline type imports
+- `explicit-function-return-type`: required
+- Complexity constraints: `complexity ≤ 5`, `max-depth ≤ 2`, `max-lines-per-function ≤ 40`
+- Unused imports plugin enabled
+
+### Format: `npm run format`
+
+- Prettier with import sorting (`@trivago/prettier-plugin-sort-imports`)
+- Single quotes, trailing commas (es5), 2-space indent, LF line endings
+- Import order: `node:` → built-ins → `@modelcontextprotocol` → `zod/glob` → external → relative
+
+### Duplicate check: `npm run dup-check`
+
+- jscpd with threshold 3, minTokens 50
+
+### Naming Conventions
+
+- Files: `snake_case.ts` for lib/tools/schemas
+- Exports: named exports preferred; `type` keyword for type-only exports
 
 ## Build / Release
 
-- Build: `npm run build` (runs `tsc`)
-- Output: `dist/` (see `tsconfig.json#compilerOptions.outDir`)
-- Start/prod: `npm start` (runs `node dist/index.js`)
-- CI/release automation: no GitHub Actions workflows found in `.github/workflows/`.
+- **Build output**: `dist/` (compiled JS + source maps)
+- **Versioning**: Git tags (`vX.Y.Z`), automated via GitHub release
+- **Publish trigger**: Creating a GitHub release runs `.github/workflows/publish.yml`
+- **CI checks before publish**: lint → type-check → test → build
+- **npm trusted publishing**: OIDC (no `NODE_AUTH_TOKEN` needed)
 
 ## Security & Safety
 
-- Secrets:
-  - Keep credentials out of source control; use environment variables.
-  - `.env*` files are ignored by `.gitignore`.
-  - `.vscode/*` is ignored by `.gitignore` except `extensions.json` and `tasks.json`.
-- stdio transport:
-  - Avoid writing non-MCP data to stdout; use `console.error()` for logs.
-- Persistence:
-  - Todos are written to `todos.json` (plain JSON). Don’t store sensitive data in todo fields.
+- **No secrets in code**: Use environment variables for configuration
+- **Atomic writes**: Storage uses atomic JSON writes (write-then-rename)
+- **Safe deletion**: `delete_todo` supports `dryRun` for previews
+- **Input validation**: All tool inputs validated via Zod schemas
 
 ## Pull Request / Commit Guidelines
 
-- Before opening a PR, run:
-  - `npm run format`
-  - `npm run lint`
-  - `npm run type-check`
-  - `npm run build`
-- Keep changes consistent with existing patterns:
-  - Tools return both `content` (stringified JSON) and `structuredContent`.
-  - Use shared schemas from `src/schemas/` and shared error helper from `src/lib/errors.ts`.
+- **Required checks before PR**:
+
+  ```bash
+  npm run format
+  npm run lint
+  npm run type-check
+  npm run build
+  ```
+
+- **Commit format**: Not enforced; keep messages descriptive
+- **CI on release**: lint, type-check, test, build must pass
 
 ## Troubleshooting
 
-- `npm start` fails with missing `dist/index.js`:
-  - Run `npm run build` first.
-- Todos aren’t persisting:
-  - Check write permissions for `todos.json` at repo root.
-- VS Code task “test” fails:
-  - `npm run test` is referenced in `.vscode/tasks.json`, but there is no `test` script in `package.json`.
+| Issue                            | Fix                                                                        |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| `Cannot find module` after clone | Run `npm install` then `npm run build`                                     |
+| Type errors in IDE               | Ensure TypeScript version matches (`^5.9`); restart TS server              |
+| Tests fail with import errors    | Use Node.js ≥20; tests use `--import tsx/esm`                              |
+| Inspector doesn't connect        | Build first: `npm run build`, then run inspector with `node dist/index.js` |
+| Storage path issues              | Set `TODOKIT_TODO_FILE` env var to absolute path                           |
 
-## Open Questions / TODO
+## Agent Operating Rules
 
-- Add or remove the VS Code `test` task: either define a `test` script in `package.json` or delete the task from `.vscode/tasks.json`.
-- If CI is desired, add workflows under `.github/workflows/` (the repo’s `.gitignore` is set up to allow that folder).
+1. **Search before edit**: Use grep/search to understand existing patterns before modifying
+2. **Verify imports**: Check `package.json` before adding dependencies
+3. **Respect complexity limits**: Keep functions ≤40 lines, complexity ≤5, depth ≤2
+4. **Type everything**: No `any`; use explicit return types
+5. **Run checks**: Always run `npm run lint && npm run type-check` before committing
+6. **Avoid destructive commands**: No `rm -rf` on source directories
