@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { TodosSchema } from '../src/lib/types.js';
 import {
   AddTodoSchema,
   DeleteTodoSchema,
@@ -26,6 +27,20 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('rejects empty delete payload', () => {
     const result = DeleteTodoSchema.safeParse({});
+    assert.equal(result.success, false);
+  });
+
+  it('rejects invalid timestamps in todos', () => {
+    const result = TodosSchema.safeParse([
+      {
+        id: '1',
+        title: 'Bad timestamp',
+        completed: false,
+        priority: 'normal',
+        tags: [],
+        createdAt: 'not-iso',
+      },
+    ]);
     assert.equal(result.success, false);
   });
 });

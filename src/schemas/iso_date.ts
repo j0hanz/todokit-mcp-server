@@ -21,3 +21,5 @@ export const IsoDateSchema = z
   .refine((value) => isValidIsoDate(value), {
     message: 'Invalid date (YYYY-MM-DD)',
   });
+
+export const IsoDateTimeSchema = z.string().datetime({ offset: true });

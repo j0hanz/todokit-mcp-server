@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { IsoDateSchema } from '../schemas/iso_date.js';
+import { IsoDateSchema, IsoDateTimeSchema } from '../schemas/iso_date.js';
 
 const TodoSchema = z.object({
   id: z.string(),
@@ -10,9 +10,9 @@ const TodoSchema = z.object({
   priority: z.enum(['low', 'normal', 'high']).default('normal'),
   dueDate: IsoDateSchema.optional(),
   tags: z.array(z.string()).default([]),
-  createdAt: z.string(),
-  updatedAt: z.string().optional(),
-  completedAt: z.string().optional(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema.optional(),
+  completedAt: IsoDateTimeSchema.optional(),
 });
 
 export const TodosSchema = z.array(TodoSchema);

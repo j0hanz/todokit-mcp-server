@@ -87,6 +87,30 @@ function sortTodos(todos: Todo[], sortBy: SortBy, order: SortOrder): Todo[] {
   });
 }
 
+function isSortedByCreatedAtAsc(todos: Todo[]): boolean {
+  for (let index = 1; index < todos.length; index += 1) {
+    const prev = todos[index - 1];
+    const current = todos[index];
+    if (prev && current && prev.createdAt > current.createdAt) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function maybeSortTodos(
+  todos: Todo[],
+  sortBy: SortBy,
+  order: SortOrder
+): Todo[] {
+  if (sortBy !== 'createdAt' || order !== 'asc') {
+    return sortTodos(todos, sortBy, order);
+  }
+  return isSortedByCreatedAtAsc(todos)
+    ? todos
+    : sortTodos(todos, sortBy, order);
+}
+
 function normalizeQuery(query?: string): string | undefined {
   const trimmed = query?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
@@ -181,7 +205,7 @@ async function handleListTodos(
 
   const todayIso = getTodayIso();
   const counts = computeCounts(allTodos, todayIso);
-  const sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
+  const sorted = maybeSortTodos(allTodos, normalized.sortBy, normalized.order);
   const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
   const summary = buildSummary(counts, paged.length);
 
