@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { readTodos, withTodos } from './db.js';
 import {
   type MatchOutcome,
   type ResolveTodoInput,
@@ -12,21 +13,14 @@ import {
   type TodoFilters,
 } from './storage_filters.js';
 import {
-  completeTodoInList,
   type CompleteTodoOutcome,
   createNotFoundOutcome,
   type TodoUpdate,
-  updateTodoInList,
 } from './storage_mutations.js';
-import {
-  persistTodos,
-  queueWrite,
-  readTodosFromDisk,
-  waitForWrites,
-} from './storage_state.js';
 import { type Todo } from './types.js';
 
 export { normalizeTags };
+export type { CompleteTodoOutcome };
 
 interface NewTodoInput {
   title: string;
@@ -36,9 +30,12 @@ interface NewTodoInput {
   tags?: string[];
 }
 
+function getAllTodos(): Promise<Todo[]> {
+  return readTodos();
+}
+
 export async function getTodos(filters?: TodoFilters): Promise<Todo[]> {
-  await waitForWrites();
-  const todos = await readTodosFromDisk();
+  const todos = await getAllTodos();
   return filters ? filterTodos(todos, filters) : todos;
 }
 
@@ -58,51 +55,78 @@ export async function addTodo(
   return todo;
 }
 
-export async function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const timestamp = new Date().toISOString();
-    const newTodos: Todo[] = items.map((item) => ({
-      id: randomUUID(),
-      title: item.title,
-      description: item.description,
-      completed: false,
-      priority: item.priority ?? 'normal',
-      dueDate: item.dueDate,
-      tags: normalizeTags(item.tags ?? []),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      completedAt: undefined,
-    }));
-    const nextTodos = [...todos, ...newTodos];
-    await persistTodos(nextTodos);
-    return newTodos;
+function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
+  return {
+    id: randomUUID(),
+    title: item.title,
+    description: item.description,
+    completed: false,
+    priority: item.priority ?? 'normal',
+    dueDate: item.dueDate,
+    tags: normalizeTags(item.tags ?? []),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    completedAt: undefined,
+  };
+}
+
+export function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
+  const timestamp = new Date().toISOString();
+  return withTodos((todos) => {
+    const newTodos = items.map((item) => createNewTodo(item, timestamp));
+    return { todos: [...todos, ...newTodos], result: newTodos };
   });
 }
 
-export async function updateTodo(
+function calculateUpdatedTodo(
+  current: Todo,
+  updates: Partial<Omit<Todo, 'id' | 'createdAt'>>
+): Todo {
+  if (updates.tags) {
+    updates.tags = normalizeTags(updates.tags);
+  }
+
+  const updatedTodo = {
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (
+    updates.completed !== undefined &&
+    updates.completed !== current.completed
+  ) {
+    updatedTodo.completedAt = updates.completed
+      ? new Date().toISOString()
+      : undefined;
+  }
+  return updatedTodo;
+}
+
+export function updateTodo(
   id: string,
   updates: Partial<Omit<Todo, 'id' | 'createdAt'>>
 ): Promise<Todo | null> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const updatedTodo = updateTodoInList(todos, id, updates);
-    if (!updatedTodo) return null;
-
-    await persistTodos(todos);
-    return updatedTodo;
+  return withTodos((todos) => {
+    const index = todos.findIndex((todo) => todo.id === id);
+    if (index < 0) {
+      return { todos, result: null };
+    }
+    const current = todos[index];
+    if (!current) {
+      return { todos, result: null };
+    }
+    const updatedTodo = calculateUpdatedTodo(current, updates);
+    const nextTodos = [...todos];
+    nextTodos[index] = updatedTodo;
+    return { todos: nextTodos, result: updatedTodo };
   });
 }
 
-export async function deleteTodo(id: string): Promise<boolean> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const index = todos.findIndex((todo) => todo.id === id);
-    if (index === -1) return false;
-
-    todos.splice(index, 1);
-    await persistTodos(todos);
-    return true;
+export function deleteTodo(id: string): Promise<boolean> {
+  return withTodos((todos) => {
+    const remaining = todos.filter((todo) => todo.id !== id);
+    return { todos: remaining, result: remaining.length !== todos.length };
   });
 }
 
@@ -112,82 +136,68 @@ export async function updateTodoBySelector(
   input: ResolveTodoInput,
   buildUpdates: (todo: Todo) => TodoUpdate | null
 ): Promise<UpdateTodoOutcome> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') {
-      return outcome;
-    }
-    const updates = buildUpdates(outcome.todo);
-    if (!updates || Object.keys(updates).length === 0) {
-      return { kind: 'no_updates' };
-    }
-    const updatedTodo = updateTodoInList(todos, outcome.todo.id, updates);
-    if (!updatedTodo) {
-      return createNotFoundOutcome(outcome.todo.id);
-    }
-    await persistTodos(todos);
-    return { kind: 'match', todo: updatedTodo };
-  });
+  const todos = await getAllTodos();
+  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+  if (outcome.kind !== 'match') {
+    return outcome;
+  }
+
+  const updates = buildUpdates(outcome.todo);
+  if (!updates || Object.keys(updates).length === 0) {
+    return { kind: 'no_updates' };
+  }
+
+  const updated = await updateTodo(outcome.todo.id, updates);
+  if (!updated) {
+    return createNotFoundOutcome(outcome.todo.id);
+  }
+
+  return { kind: 'match', todo: updated };
 }
 
 export async function deleteTodoBySelector(
   input: ResolveTodoInput
 ): Promise<MatchOutcome> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') return outcome;
+  const todos = await getAllTodos();
+  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+  if (outcome.kind !== 'match') return outcome;
 
-    const index = todos.findIndex((todo) => todo.id === outcome.todo.id);
-    if (index === -1) {
-      return createNotFoundOutcome(outcome.todo.id);
-    }
-    const removed = todos[index];
-    if (!removed) {
-      return createNotFoundOutcome(outcome.todo.id);
-    }
-    todos.splice(index, 1);
+  const deleted = await deleteTodo(outcome.todo.id);
+  if (!deleted) {
+    return createNotFoundOutcome(outcome.todo.id);
+  }
 
-    await persistTodos(todos);
-    return { kind: 'match', todo: removed };
-  });
+  return { kind: 'match', todo: outcome.todo };
 }
-
-export type { CompleteTodoOutcome };
 
 export async function completeTodoBySelector(
   input: ResolveTodoInput,
   completed: boolean
 ): Promise<CompleteTodoOutcome> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') return outcome;
+  const todos = await getAllTodos();
+  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+  if (outcome.kind !== 'match') return outcome;
 
-    const result = completeTodoInList(todos, outcome.todo.id, completed);
-    if (result.kind === 'match') {
-      await persistTodos(todos);
-    }
-    return result;
-  });
+  const updated = await updateTodo(outcome.todo.id, { completed });
+  if (!updated) {
+    return createNotFoundOutcome(outcome.todo.id);
+  }
+
+  return { kind: 'match', todo: updated };
 }
 
-export async function deleteTodosByIds(ids: string[]): Promise<string[]> {
-  return queueWrite(async () => {
-    const todos = await readTodosFromDisk();
-    const idSet = new Set(ids);
+export function deleteTodosByIds(ids: string[]): Promise<string[]> {
+  const idsToDelete = new Set(ids);
+  return withTodos((todos) => {
     const deletedIds: string[] = [];
-
-    const remaining = todos.filter((todo) => {
-      if (idSet.has(todo.id)) {
+    const remaining: Todo[] = [];
+    for (const todo of todos) {
+      if (idsToDelete.has(todo.id)) {
         deletedIds.push(todo.id);
-        return false;
+      } else {
+        remaining.push(todo);
       }
-      return true;
-    });
-
-    await persistTodos(remaining);
-    return deletedIds;
+    }
+    return { todos: remaining, result: deletedIds };
   });
 }

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach } from 'node:test';
 
+import { closeDb } from '../src/lib/db.js';
+
 let tempDir = '';
 
 beforeEach(async () => {
@@ -11,6 +13,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await closeDb();
   delete process.env.TODOKIT_TODO_FILE;
   if (tempDir) {
     await rm(tempDir, { recursive: true, force: true });

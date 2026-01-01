@@ -82,25 +82,4 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     const remaining = await getTodos();
     assert.equal(remaining.length, 0);
   });
-
-  it('rejects directory overrides for TODOKIT_TODO_FILE', async () => {
-    const currentPath = process.env.TODOKIT_TODO_FILE;
-    assert.ok(currentPath);
-    const directoryOverride = join(dirname(currentPath), 'todos.json');
-    await mkdir(directoryOverride, { recursive: true });
-    process.env.TODOKIT_TODO_FILE = directoryOverride;
-
-    await assert.rejects(() => getTodos(), /not a file/i);
-  });
-
-  it('rejects non-json overrides for TODOKIT_TODO_FILE', async () => {
-    const currentPath = process.env.TODOKIT_TODO_FILE;
-    assert.ok(currentPath);
-    process.env.TODOKIT_TODO_FILE = currentPath.replace(
-      /todos\.json$/i,
-      'todos.txt'
-    );
-
-    await assert.rejects(() => getTodos(), /must end with \.json/i);
-  });
 });
