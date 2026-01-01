@@ -13,18 +13,25 @@ const server = new McpServer(
 
 registerAllTools(server);
 
+let shuttingDown = false;
+
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
   try {
     await server.close();
   } catch (error: unknown) {
     console.error(`Shutdown error (${signal}):`, error);
-  } finally {
-    process.exit(0);
+    process.exitCode = 1;
+    return;
   }
+  process.exitCode = 0;
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
@@ -33,5 +40,5 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   console.error('Server error:', error);
-  process.exit(1);
+  process.exitCode = 1;
 });

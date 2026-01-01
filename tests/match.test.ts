@@ -9,12 +9,14 @@ import {
 import { addTodo, getTodos } from '../src/lib/storage.js';
 import './setup.js';
 
+const TEST_TIMEOUT_MS = 5000;
+
 async function resolveTodoTarget(input: ResolveTodoInput) {
   const todos = await getTodos();
   return resolveTodoTargetFromTodos(todos, input);
 }
 
-describe('match resolution', () => {
+describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
   it('throws when no identifier provided', () => {
     assert.throws(() => toResolveInput({}), /Provide id or query/);
   });

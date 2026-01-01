@@ -14,6 +14,8 @@ import { registerListTodos } from '../src/tools/list_todos.js';
 import { registerUpdateTodo } from '../src/tools/update_todo.js';
 import './setup.js';
 
+const TEST_TIMEOUT_MS = 5000;
+
 type ToolHandler<T> = (input: T) => Promise<CallToolResult>;
 
 type StructuredResult = {
@@ -48,7 +50,7 @@ function getStructured(result: CallToolResult) {
   return (result as StructuredResult).structuredContent;
 }
 
-describe('tool handlers', () => {
+describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
   it('registers all tools', () => {
     const { server, getHandler } = createToolHarness();
     registerAllTools(server);

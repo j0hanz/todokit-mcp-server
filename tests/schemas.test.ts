@@ -8,7 +8,9 @@ import {
 } from '../src/schemas/inputs.js';
 import './setup.js';
 
-describe('schemas', () => {
+const TEST_TIMEOUT_MS = 5000;
+
+describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
   it('rejects unknown fields on add', () => {
     const result = AddTodoSchema.safeParse({ title: 'Test', extra: 'nope' });
     assert.equal(result.success, false);

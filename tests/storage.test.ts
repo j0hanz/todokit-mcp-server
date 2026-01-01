@@ -11,7 +11,9 @@ import {
 } from '../src/lib/storage.js';
 import './setup.js';
 
-describe('storage', () => {
+const TEST_TIMEOUT_MS = 5000;
+
+describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('normalizes tags', () => {
     assert.deepEqual(normalizeTags([' Work ', 'work', '', 'Home']), [
       'work',
