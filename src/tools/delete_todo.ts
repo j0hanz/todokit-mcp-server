@@ -50,11 +50,10 @@ async function handleDeleteTodoDryRun(
   input: DeleteTodoInput
 ): Promise<CallToolResult> {
   const todos = await getTodos();
+  const selector =
+    input.id !== undefined ? { id: input.id } : { query: input.query };
   const outcome = unwrapResolution(
-    resolveTodoTargetFromTodos(
-      todos,
-      toResolveInput({ id: input.id, query: input.query })
-    )
+    resolveTodoTargetFromTodos(todos, toResolveInput(selector))
   );
   if (outcome.kind === 'error') return outcome.response;
   if (outcome.kind === 'ambiguous') {
@@ -66,9 +65,9 @@ async function handleDeleteTodoDryRun(
 async function handleDeleteTodoLive(
   input: DeleteTodoInput
 ): Promise<CallToolResult> {
-  const outcome = await deleteTodoBySelector(
-    toResolveInput({ id: input.id, query: input.query })
-  );
+  const selector =
+    input.id !== undefined ? { id: input.id } : { query: input.query };
+  const outcome = await deleteTodoBySelector(toResolveInput(selector));
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }

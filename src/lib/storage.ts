@@ -24,10 +24,10 @@ export type { CompleteTodoOutcome };
 
 interface NewTodoInput {
   title: string;
-  description?: string;
-  priority?: 'low' | 'normal' | 'high';
-  dueDate?: string;
-  tags?: string[];
+  description?: string | undefined;
+  priority?: 'low' | 'normal' | 'high' | undefined;
+  dueDate?: string | undefined;
+  tags?: string[] | undefined;
 }
 
 function normalizeUpdates(updates: TodoUpdate): TodoUpdate {

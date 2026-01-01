@@ -63,8 +63,10 @@ async function handleCompleteTodo(
   input: CompleteTodoInput
 ): Promise<CallToolResult> {
   const targetCompleted = input.completed ?? true;
+  const selector =
+    input.id !== undefined ? { id: input.id } : { query: input.query };
   const outcome = await completeTodoBySelector(
-    toResolveInput({ id: input.id, query: input.query }),
+    toResolveInput(selector),
     targetCompleted
   );
   return buildOutcomeResponse(outcome, targetCompleted);

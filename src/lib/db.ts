@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,6 +8,12 @@ import { type Todo, TodosSchema } from './types.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TODO_FILE = join(__dirname, '../../todos.json');
 
+interface TodoCache {
+  todos: Todo[];
+  mtimeMs: number | null;
+}
+
+let cache: TodoCache | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
 function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
@@ -51,6 +57,17 @@ function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
     () => undefined
   );
   return run;
+}
+
+async function getFileMtime(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function readFileIfExists(path: string): Promise<string | null> {
@@ -116,11 +133,19 @@ async function writeFileAtomic(path: string, contents: string): Promise<void> {
 async function saveTodos(path: string, todos: Todo[]): Promise<void> {
   const payload = `${JSON.stringify(todos, null, 2)}\n`;
   await writeFileAtomic(path, payload);
+  cache = { todos, mtimeMs: await getFileMtime(path) };
 }
 
 export async function readTodos(): Promise<Todo[]> {
   await writeQueue;
-  return loadTodos(getTodoFilePath());
+  const path = getTodoFilePath();
+  const mtimeMs = await getFileMtime(path);
+  if (cache?.mtimeMs === mtimeMs) {
+    return cache.todos;
+  }
+  const todos = await loadTodos(path);
+  cache = { todos, mtimeMs };
+  return todos;
 }
 
 export async function withTodos<T>(
@@ -129,6 +154,7 @@ export async function withTodos<T>(
   return enqueueWrite(async () => {
     const path = getTodoFilePath();
     const current = await loadTodos(path);
+    cache = { todos: current, mtimeMs: await getFileMtime(path) };
     const { todos, result } = mutate(current);
     if (todos !== current) {
       await saveTodos(path, todos);
@@ -140,4 +166,5 @@ export async function withTodos<T>(
 export async function closeDb(): Promise<void> {
   await writeQueue;
   writeQueue = Promise.resolve();
+  cache = null;
 }

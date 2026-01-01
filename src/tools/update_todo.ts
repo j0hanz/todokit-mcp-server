@@ -6,16 +6,14 @@ import type { z } from 'zod';
 import { createErrorResponse, getErrorMessage } from '../lib/errors.js';
 import { toResolveInput } from '../lib/resolve.js';
 import { normalizeTags, updateTodoBySelector } from '../lib/storage.js';
+import type { TodoUpdate } from '../lib/storage_mutations.js';
 import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { UpdateTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
 
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
-type UpdateFields = Omit<
-  UpdateTodoInput,
-  'id' | 'query' | 'clearFields' | 'tagOps'
->;
+type UpdateFields = TodoUpdate;
 type ClearField = NonNullable<UpdateTodoInput['clearFields']>[number];
 
 function normalizeTagOps(tagOps: UpdateTodoInput['tagOps']): {
@@ -113,9 +111,10 @@ function buildUpdatePayload(
 async function handleUpdateTodo(
   input: UpdateTodoInput
 ): Promise<CallToolResult> {
-  const outcome = await updateTodoBySelector(
-    toResolveInput({ id: input.id, query: input.query }),
-    (todo) => buildUpdatePayload(todo, input)
+  const selector =
+    input.id !== undefined ? { id: input.id } : { query: input.query };
+  const outcome = await updateTodoBySelector(toResolveInput(selector), (todo) =>
+    buildUpdatePayload(todo, input)
   );
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;

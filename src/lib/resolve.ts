@@ -20,8 +20,8 @@ function buildMatchPreviews(
     id: todo.id,
     title: todo.title,
     priority: todo.priority,
-    dueDate: todo.dueDate,
     completed: todo.completed,
+    ...(todo.dueDate === undefined ? {} : { dueDate: todo.dueDate }),
   }));
 }
 

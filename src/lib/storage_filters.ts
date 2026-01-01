@@ -1,12 +1,12 @@
 import type { Todo } from './types.js';
 
 export interface TodoFilters {
-  completed?: boolean;
-  priority?: 'low' | 'normal' | 'high';
-  tag?: string;
-  dueBefore?: string;
-  dueAfter?: string;
-  query?: string;
+  completed?: boolean | undefined;
+  priority?: 'low' | 'normal' | 'high' | undefined;
+  tag?: string | undefined;
+  dueBefore?: string | undefined;
+  dueAfter?: string | undefined;
+  query?: string | undefined;
 }
 
 function normalizeTag(tag: string): string {

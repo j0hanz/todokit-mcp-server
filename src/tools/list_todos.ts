@@ -15,16 +15,25 @@ type SortBy = 'dueDate' | 'priority' | 'createdAt' | 'title';
 type SortOrder = 'asc' | 'desc';
 
 interface NormalizedFilters {
-  completed?: boolean;
-  priority?: Todo['priority'];
-  tag?: string;
-  dueBefore?: string;
-  dueAfter?: string;
-  query?: string;
+  completed?: boolean | undefined;
+  priority?: Todo['priority'] | undefined;
+  tag?: string | undefined;
+  dueBefore?: string | undefined;
+  dueAfter?: string | undefined;
+  query?: string | undefined;
   sortBy: SortBy;
   order: SortOrder;
   limit: number;
   offset: number;
+}
+
+interface CountSummary {
+  total: number;
+  completed: number;
+  pending: number;
+  overdue: number;
+  isCreatedAtAsc: boolean;
+  isCreatedAtDesc: boolean;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -99,17 +108,11 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
   };
 }
 
-function computeCounts(
-  todos: Todo[],
-  todayIso: string
-): {
-  total: number;
-  completed: number;
-  pending: number;
-  overdue: number;
-} {
+function computeCounts(todos: Todo[], todayIso: string): CountSummary {
   let completed = 0;
   let overdue = 0;
+  let previousCreatedAt: string | null = null;
+  const orderState = { isCreatedAtAsc: true, isCreatedAtDesc: true };
   for (const todo of todos) {
     if (todo.completed) {
       completed += 1;
@@ -117,6 +120,11 @@ function computeCounts(
     if (isOverdue(todo, todayIso)) {
       overdue += 1;
     }
+    previousCreatedAt = updateCreatedAtOrder(
+      previousCreatedAt,
+      todo.createdAt,
+      orderState
+    );
   }
   const total = todos.length;
   return {
@@ -124,18 +132,28 @@ function computeCounts(
     completed,
     pending: total - completed,
     overdue,
+    ...orderState,
   };
 }
 
-function buildSummary(
-  counts: {
-    total: number;
-    completed: number;
-    pending: number;
-    overdue: number;
-  },
-  pageCount: number
+function updateCreatedAtOrder(
+  previous: string | null,
+  current: string,
+  orderState: { isCreatedAtAsc: boolean; isCreatedAtDesc: boolean }
 ): string {
+  if (previous === null) {
+    return current;
+  }
+  if (current < previous) {
+    orderState.isCreatedAtAsc = false;
+  }
+  if (current > previous) {
+    orderState.isCreatedAtDesc = false;
+  }
+  return current;
+}
+
+function buildSummary(counts: CountSummary, pageCount: number): string {
   if (counts.total === 0) {
     return 'No todos found';
   }
@@ -150,23 +168,20 @@ function paginateTodos(todos: Todo[], offset: number, limit: number): Todo[] {
   return todos.slice(offset, offset + limit);
 }
 
-async function handleListTodos(
-  filters: ListTodosFilters
-): Promise<CallToolResult> {
-  const normalized = normalizeFilters(filters);
-  const allTodos = await getTodos({
-    completed: normalized.completed,
-    priority: normalized.priority,
-    tag: normalized.tag,
-    dueBefore: normalized.dueBefore,
-    dueAfter: normalized.dueAfter,
-    query: normalized.query,
-  });
+function canReuseOrder(
+  sortBy: SortBy,
+  order: SortOrder,
+  counts: CountSummary
+): boolean {
+  if (sortBy !== 'createdAt') return false;
+  return order === 'asc' ? counts.isCreatedAtAsc : counts.isCreatedAtDesc;
+}
 
-  const todayIso = getTodayIso();
-  const counts = computeCounts(allTodos, todayIso);
-  const sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
-  const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
+function buildListResponse(
+  paged: Todo[],
+  counts: CountSummary,
+  normalized: NormalizedFilters
+): CallToolResult {
   const summary = buildSummary(counts, paged.length);
   const hasMore = normalized.offset + paged.length < counts.total;
 
@@ -186,6 +201,28 @@ async function handleListTodos(
       hasMore,
     },
   });
+}
+
+async function handleListTodos(
+  filters: ListTodosFilters
+): Promise<CallToolResult> {
+  const normalized = normalizeFilters(filters);
+  const allTodos = await getTodos({
+    completed: normalized.completed,
+    priority: normalized.priority,
+    tag: normalized.tag,
+    dueBefore: normalized.dueBefore,
+    dueAfter: normalized.dueAfter,
+    query: normalized.query,
+  });
+
+  const todayIso = getTodayIso();
+  const counts = computeCounts(allTodos, todayIso);
+  const sorted = canReuseOrder(normalized.sortBy, normalized.order, counts)
+    ? allTodos
+    : sortTodos(allTodos, normalized.sortBy, normalized.order);
+  const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
+  return buildListResponse(paged, counts, normalized);
 }
 
 export function registerListTodos(server: McpServer): void {
