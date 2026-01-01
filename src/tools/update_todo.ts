@@ -86,13 +86,34 @@ function applyTagUpdates(
   updates.tags = buildMergedTags(baseTodo, fieldsToClear, tagOps);
 }
 
+function assignIfDefined<K extends keyof UpdateFields>(
+  updates: UpdateFields,
+  key: K,
+  value: UpdateFields[K]
+): void {
+  if (value !== undefined) {
+    updates[key] = value;
+  }
+}
+
+function buildBaseUpdates(input: UpdateTodoInput): UpdateFields {
+  const updates: UpdateFields = {};
+  assignIfDefined(updates, 'title', input.title);
+  assignIfDefined(updates, 'description', input.description);
+  assignIfDefined(updates, 'completed', input.completed);
+  assignIfDefined(updates, 'priority', input.priority);
+  assignIfDefined(updates, 'dueDate', input.dueDate);
+  assignIfDefined(updates, 'tags', input.tags);
+  return updates;
+}
+
 function buildUpdatePayload(
   baseTodo: Todo,
   input: UpdateTodoInput
 ): UpdateFields | null {
-  const { clearFields, tagOps, ...updates } = input;
+  const { clearFields, tagOps } = input;
   const fieldsToClear = new Set<ClearField>(clearFields ?? []);
-  const nextUpdates: UpdateFields = { ...updates };
+  const nextUpdates = buildBaseUpdates(input);
 
   applyClearFields(nextUpdates, fieldsToClear);
   applyTagUpdates(nextUpdates, baseTodo, fieldsToClear, tagOps);

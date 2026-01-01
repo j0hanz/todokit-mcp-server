@@ -40,6 +40,12 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      - name: Run coverage
+        run: npm run test:coverage
+
+      - name: Run duplication check
+        run: npm run dup-check
+
       - name: Build package
         run: npm run build
 

@@ -49,4 +49,15 @@ describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
       assert.ok(result.previews.length > 0);
     }
   });
+
+  it('returns missing for blank query', async () => {
+    const result = await resolveTodoTarget({ query: '   ' });
+    assert.equal(result.kind, 'missing');
+    if (result.kind === 'missing') {
+      assert.equal(
+        result.response.structuredContent.error.code,
+        'E_BAD_REQUEST'
+      );
+    }
+  });
 });

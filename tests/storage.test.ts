@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { dirname } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -85,8 +86,21 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('rejects directory overrides for TODOKIT_TODO_FILE', async () => {
     const currentPath = process.env.TODOKIT_TODO_FILE;
     assert.ok(currentPath);
-    process.env.TODOKIT_TODO_FILE = dirname(currentPath);
+    const directoryOverride = join(dirname(currentPath), 'todos.json');
+    await mkdir(directoryOverride, { recursive: true });
+    process.env.TODOKIT_TODO_FILE = directoryOverride;
 
     await assert.rejects(() => getTodos(), /not a file/i);
+  });
+
+  it('rejects non-json overrides for TODOKIT_TODO_FILE', async () => {
+    const currentPath = process.env.TODOKIT_TODO_FILE;
+    assert.ok(currentPath);
+    process.env.TODOKIT_TODO_FILE = currentPath.replace(
+      /todos\.json$/i,
+      'todos.txt'
+    );
+
+    await assert.rejects(() => getTodos(), /must end with \.json/i);
   });
 });

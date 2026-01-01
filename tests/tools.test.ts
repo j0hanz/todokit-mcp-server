@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodo, getTodos } from '../src/lib/storage.js';
+import { addTodo, getTodos, updateTodo } from '../src/lib/storage.js';
 import { registerAddTodo } from '../src/tools/add_todo.js';
 import { registerAddTodos } from '../src/tools/add_todos.js';
 import { registerCompleteTodo } from '../src/tools/complete_todo.js';
@@ -122,6 +122,54 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     }
   });
 
+  it('lists empty results with summary', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerListTodos(server);
+
+    const listHandler = getHandler<Record<string, never>>('list_todos');
+    const result = await listHandler({});
+    const structured = getStructured(result)?.result as Record<string, unknown>;
+
+    assert.equal(structured.summary, 'No todos found');
+    assert.deepEqual(structured.counts, {
+      total: 0,
+      pending: 0,
+      completed: 0,
+      overdue: 0,
+    });
+  });
+
+  it('filters by completed status', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerListTodos(server);
+
+    const pending = await addTodo('Pending');
+    const completed = await addTodo('Completed');
+    await updateTodo(completed.id, { completed: true });
+
+    const listHandler = getHandler<{ status: string }>('list_todos');
+
+    const completedResult = await listHandler({ status: 'completed' });
+    const completedStructured = getStructured(completedResult)
+      ?.result as Record<string, unknown>;
+    assert.equal(
+      (completedStructured.counts as { completed: number }).completed,
+      1
+    );
+
+    const pendingResult = await listHandler({ status: 'pending' });
+    const pendingStructured = getStructured(pendingResult)?.result as Record<
+      string,
+      unknown
+    >;
+    assert.equal((pendingStructured.counts as { pending: number }).pending, 1);
+
+    const ids = (pendingStructured.items as { id: string }[]).map(
+      (item) => item.id
+    );
+    assert.deepEqual(ids, [pending.id]);
+  });
+
   it('updates, completes, and deletes todos', async () => {
     const { server, getHandler } = createToolHarness();
     registerUpdateTodo(server);
@@ -149,6 +197,58 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(getStructured(deleteResult)?.ok, true);
   });
 
+  it('handles update clearFields and no-updates errors', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerUpdateTodo(server);
+
+    const todo = await addTodo(
+      'Update Me',
+      'Has description',
+      'normal',
+      '2025-02-01',
+      ['alpha', 'beta']
+    );
+
+    const updateHandler = getHandler<{
+      id: string;
+      clearFields?: string[];
+      tagOps?: { add?: string[]; remove?: string[] };
+    }>('update_todo');
+
+    const updateResult = await updateHandler({
+      id: todo.id,
+      clearFields: ['description', 'dueDate'],
+      tagOps: { add: ['gamma'], remove: ['beta'] },
+    });
+    assert.equal(getStructured(updateResult)?.ok, true);
+
+    const noUpdates = await updateHandler({ id: todo.id });
+    const structured = getStructured(noUpdates);
+    assert.equal(structured?.error?.code, 'E_BAD_REQUEST');
+  });
+
+  it('completes, reopens, and handles already state', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerCompleteTodo(server);
+
+    const todo = await addTodo('Finish Me');
+    const completeHandler = getHandler<{ id: string; completed?: boolean }>(
+      'complete_todo'
+    );
+
+    const completeResult = await completeHandler({ id: todo.id });
+    assert.equal(getStructured(completeResult)?.ok, true);
+
+    const alreadyResult = await completeHandler({ id: todo.id });
+    assert.equal(getStructured(alreadyResult)?.ok, true);
+
+    const reopenResult = await completeHandler({
+      id: todo.id,
+      completed: false,
+    });
+    assert.equal(getStructured(reopenResult)?.ok, true);
+  });
+
   it('supports delete dry-run on ambiguous matches', async () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
@@ -164,5 +264,29 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const structured = getStructured(result);
     assert.equal(structured?.ok, true);
     assert.equal(structured?.result?.dryRun, true);
+  });
+
+  it('handles delete dry-run for single match and ambiguous errors', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerDeleteTodo(server);
+
+    const todo = await addTodo('Unique Delete');
+    await addTodo('Batch Delete One');
+    await addTodo('Batch Delete Two');
+
+    const deleteHandler = getHandler<{
+      id?: string;
+      query?: string;
+      dryRun?: boolean;
+    }>('delete_todo');
+
+    const dryRunResult = await deleteHandler({ id: todo.id, dryRun: true });
+    assert.equal(getStructured(dryRunResult)?.result?.dryRun, true);
+
+    const ambiguousResult = await deleteHandler({
+      query: 'Batch',
+      dryRun: false,
+    });
+    assert.equal(getStructured(ambiguousResult)?.ok, false);
   });
 });

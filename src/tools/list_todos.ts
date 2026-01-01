@@ -40,6 +40,16 @@ function getTodayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isOutOfOrder(
+  prev: Todo | undefined,
+  current: Todo | undefined
+): boolean {
+  if (!prev || !current) {
+    return false;
+  }
+  return prev.createdAt > current.createdAt;
+}
+
 function isOverdue(todo: Todo, todayIso: string): boolean {
   if (!todo.dueDate) return false;
   if (todo.completed) return false;
@@ -91,7 +101,7 @@ function isSortedByCreatedAtAsc(todos: Todo[]): boolean {
   for (let index = 1; index < todos.length; index += 1) {
     const prev = todos[index - 1];
     const current = todos[index];
-    if (prev && current && prev.createdAt > current.createdAt) {
+    if (isOutOfOrder(prev, current)) {
       return false;
     }
   }
@@ -116,6 +126,22 @@ function normalizeQuery(query?: string): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+function resolveSortBy(sortBy?: SortBy): SortBy {
+  return sortBy ?? 'createdAt';
+}
+
+function resolveOrder(order?: SortOrder): SortOrder {
+  return order ?? 'asc';
+}
+
+function resolveLimit(limit?: number): number {
+  return limit ?? DEFAULT_LIMIT;
+}
+
+function resolveOffset(offset?: number): number {
+  return offset ?? DEFAULT_OFFSET;
+}
+
 function resolveCompletedFilter(
   status: ListTodosFilters['status'],
   completed: ListTodosFilters['completed']
@@ -133,10 +159,10 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
     dueBefore: filters.dueBefore,
     dueAfter: filters.dueAfter,
     query: normalizeQuery(filters.query),
-    sortBy: filters.sortBy ?? 'createdAt',
-    order: filters.order ?? 'asc',
-    limit: filters.limit ?? DEFAULT_LIMIT,
-    offset: filters.offset ?? DEFAULT_OFFSET,
+    sortBy: resolveSortBy(filters.sortBy),
+    order: resolveOrder(filters.order),
+    limit: resolveLimit(filters.limit),
+    offset: resolveOffset(filters.offset),
   };
 }
 

@@ -59,7 +59,7 @@ npm start
 
 ### Storage path
 
-By default, todos are stored in `todos.json` next to the server package (the project root when running from source). To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path.
+By default, todos are stored in `todos.json` next to the server package (the project root when running from source). To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path ending with `.json`.
 
 Examples:
 
@@ -243,19 +243,20 @@ Add this to your `claude_desktop_config.json`:
 
 ### Scripts
 
-| Command               | Description                                      |
-| :-------------------- | :----------------------------------------------- |
-| npm run build         | Compile TypeScript to JavaScript                 |
-| npm run dev           | Run server in watch mode for development         |
-| npm start             | Run the built server                             |
-| npm run test          | Run unit tests (node --test + tsx)               |
-| npm run test:coverage | Run unit tests with coverage                     |
-| npm run lint          | Run ESLint                                       |
-| npm run format        | Format with Prettier                             |
-| npm run type-check    | Run TypeScript type checking                     |
-| npm run bench         | Run benchmark suite                              |
-| npm run dup-check     | Run duplicate code checks (jscpd)                |
-| npm run inspector     | Launch the MCP inspector (use with node dist/..) |
+| Command                 | Description                                      |
+| :---------------------- | :----------------------------------------------- |
+| npm run build           | Compile TypeScript to JavaScript                 |
+| npm run dev             | Run server in watch mode for development         |
+| npm start               | Run the built server                             |
+| npm run test            | Run unit tests (node --test + tsx)               |
+| npm run test:coverage   | Run unit tests with coverage                     |
+| npm run lint            | Run ESLint                                       |
+| npm run format          | Format with Prettier                             |
+| npm run type-check      | Run TypeScript type checking                     |
+| npm run bench           | Run benchmark suite                              |
+| npm run dup-check       | Run duplicate code checks (jscpd)                |
+| npm run maintainability | Run maintainability index report                 |
+| npm run inspector       | Launch the MCP inspector (use with node dist/..) |
 
 ### Manual verification
 

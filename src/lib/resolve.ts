@@ -29,6 +29,11 @@ function buildMatchPreviews(
   return todos.slice(0, limit).map(buildMatchPreview);
 }
 
+function normalizeQueryInput(query: string): string | null {
+  const trimmedQuery = query.trim();
+  return trimmedQuery.length > 0 ? trimmedQuery : null;
+}
+
 export type ResolveTodoInput =
   | { id: string; query?: never }
   | { query: string; id?: never };
@@ -119,24 +124,32 @@ function resolveByQueryFromTodos(
   todos: Todo[],
   query: string
 ): ResolveTodoResult {
-  const trimmedQuery = query.trim();
+  const trimmedQuery = normalizeQueryInput(query);
   if (!trimmedQuery) {
     return { kind: 'missing', response: createMissingIdentifierError() };
   }
   const matches = filterTodos(todos, { query: trimmedQuery });
-  if (matches.length === 1 && matches[0]) {
-    return { kind: 'match', todo: matches[0] };
+  return resolveQueryMatches(trimmedQuery, matches);
+}
+
+function resolveQueryMatches(
+  query: string,
+  matches: Todo[]
+): ResolveTodoResult {
+  const singleMatch = matches.length === 1 ? matches[0] : null;
+  if (singleMatch) {
+    return { kind: 'match', todo: singleMatch };
   }
   if (matches.length === 0) {
-    return { kind: 'not_found', response: createNotFoundError(trimmedQuery) };
+    return { kind: 'not_found', response: createNotFoundError(query) };
   }
-  const { response, previews } = createAmbiguousError(trimmedQuery, matches);
+  const { response, previews } = createAmbiguousError(query, matches);
   return {
     kind: 'ambiguous',
     response,
     matches,
     previews,
-    query: trimmedQuery,
+    query,
   };
 }
 
