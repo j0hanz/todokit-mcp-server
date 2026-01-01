@@ -1,12 +1,14 @@
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-import packageJson from '../package.json' with { type: 'json' };
 import { registerAllTools } from './tools/index.js';
 
-const SERVER_VERSION = packageJson.version;
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json') as { version?: string };
+const SERVER_VERSION = packageJson.version ?? '0.0.0';
 
 let shuttingDown = false;
 let activeServer: McpServer | null = null;
