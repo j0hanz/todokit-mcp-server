@@ -1,6 +1,8 @@
 # todokit-mcp
 
-A MCP server for Todokit, a task management and productivity tool with JSON storage.
+<img src="docs/logo.png" alt="Filesystem Context MCP Server Logo" width="150">
+
+An MCP server for Todokit, a task management and productivity tool with JSON storage.
 
 [![npm version](https://img.shields.io/npm/v/@j0hanz/todokit-mcp.svg)](https://www.npmjs.com/package/@j0hanz/todokit-mcp)
 [![License](https://img.shields.io/npm/l/@j0hanz/todokit-mcp)](LICENSE)
@@ -12,53 +14,38 @@ A MCP server for Todokit, a task management and productivity tool with JSON stor
 
 [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=todokit&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovdG9kb2tpdC1tY3BAbGF0ZXN0Il19)
 
-## ✨ Features
+## Features
 
-| Feature                 | Description                                                          |
-| :---------------------- | :------------------------------------------------------------------- |
-| 📝 **Task Management**  | Add, update, complete, and delete todos with ease.                   |
-| 🔍 **Rich Filtering**   | Filter by status, priority, tags, due date, and search text.         |
-| 🏷️ **Tagging System**   | Organize tasks with tags; support for adding/removing specific tags. |
-| 📦 **Batch Operations** | Add multiple todos in a single request.                              |
-| 💾 **JSON Persistence** | Stores data in a simple `todos.json` file in the working directory.  |
-| 🛡️ **Safe Deletion**    | Supports dry-run for deletions to preview changes.                   |
+- Task management: add, update, complete/reopen, and delete todos.
+- Batch operations: add multiple todos in one call.
+- Rich filtering: status, priority, tags, due dates, and free-text search.
+- Tagging: tags are normalized (trimmed, lowercase, unique) and can be added or removed.
+- Safe deletion: dry-run delete returns previews for ambiguous matches.
+- JSON persistence with caching and atomic writes.
 
-## 🚀 Quick Start
-
-The easiest way to use Todokit is with `npx`:
+## Quick Start
 
 ```bash
 npx -y @j0hanz/todokit-mcp@latest
 ```
 
-### VS Code
+The server runs over stdio (no HTTP endpoint) and registers MCP tools on startup.
 
-Add this to your `mcpServers` configuration in VS Code settings:
+## Installation
 
-```json
-{
-  "todokit": {
-    "command": "npx",
-    "args": ["-y", "@j0hanz/todokit-mcp@latest"]
-  }
-}
-```
-
-## 📦 Installation
-
-### NPX (Recommended)
+### NPX (recommended)
 
 ```bash
 npx -y @j0hanz/todokit-mcp@latest
 ```
 
-### Global Installation
+### Global install
 
 ```bash
 npm install -g @j0hanz/todokit-mcp
 ```
 
-### From Source
+### From source
 
 ```bash
 git clone https://github.com/j0hanz/todokit-mcp-server.git
@@ -68,97 +55,140 @@ npm run build
 npm start
 ```
 
-## ⚙️ Configuration
+## Configuration
 
-The server does not require complex configuration. It automatically creates a `todos.json` file in the directory where the server is started to store your tasks.
+### Storage path
 
-## 🔧 Tools
+By default, todos are stored in `todos.json` next to the server package (the project root when running from source). To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path.
 
-### `add_todo`
+Examples:
+
+```bash
+# macOS/Linux
+TODOKIT_TODO_FILE=/path/to/todos.json npx -y @j0hanz/todokit-mcp@latest
+```
+
+```powershell
+# Windows PowerShell
+$env:TODOKIT_TODO_FILE = 'C:\path\to\todos.json'
+npx -y @j0hanz/todokit-mcp@latest
+```
+
+## Tools
+
+All tools return a JSON payload in both `content` (stringified) and `structuredContent` with the shape:
+
+```json
+{
+  "ok": true,
+  "result": {}
+}
+```
+
+When an error occurs, `ok` is false and `error` contains `{ code, message }`.
+The `result` shape is tool-specific.
+If a `query` matches multiple todos, tools return `E_AMBIGUOUS` with previews and a hint to use an exact `id`.
+
+### add_todo
 
 Add a new todo item.
 
-| Parameter     | Type   | Required | Default  | Description                             |
-| :------------ | :----- | :------- | :------- | :-------------------------------------- |
-| `title`       | string | ✅       | -        | The title of the todo (1-200 chars)     |
-| `description` | string | ❌       | -        | Optional description (max 2000 chars)   |
-| `priority`    | string | ❌       | `normal` | Priority level: `low`, `normal`, `high` |
-| `dueDate`     | string | ❌       | -        | Due date in ISO format (YYYY-MM-DD)     |
-| `tags`        | array  | ❌       | -        | Array of tags for categorization        |
+| Parameter   | Type   | Required | Default | Description                           |
+| :---------- | :----- | :------- | :------ | :------------------------------------ |
+| title       | string | Yes      | -       | The title of the todo (1-200 chars)   |
+| description | string | No       | -       | Optional description (max 2000 chars) |
+| priority    | string | No       | normal  | Priority level: low, normal, high     |
+| dueDate     | string | No       | -       | Due date in ISO format (YYYY-MM-DD)   |
+| tags        | array  | No       | -       | Array of tags for categorization      |
 
-**Returns:** The created todo item.
-
-### `add_todos`
+### add_todos
 
 Add multiple todo items in one call.
 
-| Parameter | Type  | Required | Default | Description                                          |
-| :-------- | :---- | :------- | :------ | :--------------------------------------------------- |
-| `items`   | array | ✅       | -       | Array of todo objects (same structure as `add_todo`) |
+| Parameter | Type  | Required | Default | Description                                     |
+| :-------- | :---- | :------- | :------ | :---------------------------------------------- |
+| items     | array | Yes      | -       | Array of todo objects (same fields as add_todo) |
 
-**Returns:** Summary of added items.
-
-### `list_todos`
+### list_todos
 
 List todos with filtering, search, sorting, and pagination.
 
-| Parameter  | Type   | Required | Default     | Description                                          |
-| :--------- | :----- | :------- | :---------- | :--------------------------------------------------- |
-| `status`   | string | ❌       | -           | Filter by status: `pending`, `completed`, `all`      |
-| `priority` | string | ❌       | -           | Filter by priority: `low`, `normal`, `high`          |
-| `tag`      | string | ❌       | -           | Filter by tag (must contain)                         |
-| `query`    | string | ❌       | -           | Search text in title, description, or tags           |
-| `sortBy`   | string | ❌       | `createdAt` | Sort by: `dueDate`, `priority`, `createdAt`, `title` |
-| `order`    | string | ❌       | `asc`       | Sort order: `asc`, `desc`                            |
-| `limit`    | number | ❌       | 50          | Max number of results                                |
-| `offset`   | number | ❌       | 0           | Number of results to skip                            |
+| Parameter | Type    | Required | Default   | Description                                       |
+| :-------- | :------ | :------- | :-------- | :------------------------------------------------ |
+| status    | string  | No       | all       | Filter by status: pending, completed, all         |
+| completed | boolean | No       | -         | Deprecated; status takes precedence when provided |
+| priority  | string  | No       | -         | Filter by priority: low, normal, high             |
+| tag       | string  | No       | -         | Filter by tag (must contain)                      |
+| query     | string  | No       | -         | Search text in title, description, or tags        |
+| dueBefore | string  | No       | -         | Filter todos due before this date (YYYY-MM-DD)    |
+| dueAfter  | string  | No       | -         | Filter todos due after this date (YYYY-MM-DD)     |
+| sortBy    | string  | No       | createdAt | Sort by: dueDate, priority, createdAt, title      |
+| order     | string  | No       | asc       | Sort order: asc, desc                             |
+| limit     | number  | No       | 50        | Max number of results                             |
+| offset    | number  | No       | 0         | Number of results to skip                         |
 
-**Returns:** List of todos, summary, and counts.
+### update_todo
 
-### `update_todo`
+Update fields on a todo item. Provide either `id` or `query` to identify the todo.
 
-Update fields on a todo item. Requires either `id` or `query` to identify the todo.
+| Parameter   | Type    | Required | Default | Description                                    |
+| :---------- | :------ | :------- | :------ | :--------------------------------------------- |
+| id          | string  | No       | -       | The ID of the todo to update                   |
+| query       | string  | No       | -       | Search text to find a single todo to update    |
+| title       | string  | No       | -       | New title                                      |
+| description | string  | No       | -       | New description                                |
+| completed   | boolean | No       | -       | Completion status                              |
+| priority    | string  | No       | -       | New priority level                             |
+| dueDate     | string  | No       | -       | New due date (YYYY-MM-DD)                      |
+| tags        | array   | No       | -       | Replace all tags                               |
+| tagOps      | object  | No       | -       | Tag modifications to apply (add/remove arrays) |
+| clearFields | array   | No       | -       | Fields to clear: description, dueDate, tags    |
 
-| Parameter     | Type    | Required | Default | Description                                       |
-| :------------ | :------ | :------- | :------ | :------------------------------------------------ |
-| `id`          | string  | ❌       | -       | The ID of the todo to update                      |
-| `query`       | string  | ❌       | -       | Search text to find a single todo to update       |
-| `title`       | string  | ❌       | -       | New title                                         |
-| `description` | string  | ❌       | -       | New description                                   |
-| `completed`   | boolean | ❌       | -       | Completion status                                 |
-| `priority`    | string  | ❌       | -       | New priority level                                |
-| `dueDate`     | string  | ❌       | -       | New due date (ISO format)                         |
-| `tags`        | array   | ❌       | -       | New tags (replaces existing)                      |
-| `tagOps`      | object  | ❌       | -       | Object with `add` and `remove` arrays for tags    |
-| `clearFields` | array   | ❌       | -       | Fields to clear: `description`, `dueDate`, `tags` |
+Notes:
 
-**Returns:** The updated todo item.
+- If both `tags` and `tagOps` are provided, `tags` wins and replaces the list.
+- If no updatable fields are provided, the tool returns an error.
 
-### `complete_todo`
+### complete_todo
 
-Set completion status for a todo item. Requires either `id` or `query`.
+Set completion status for a todo item. Provide either `id` or `query`.
 
-| Parameter   | Type    | Required | Default | Description                       |
-| :---------- | :------ | :------- | :------ | :-------------------------------- |
-| `id`        | string  | ❌       | -       | The ID of the todo to complete    |
-| `query`     | string  | ❌       | -       | Search text to find a single todo |
-| `completed` | boolean | ❌       | `true`  | Set completion status             |
+| Parameter | Type    | Required | Default | Description                       |
+| :-------- | :------ | :------- | :------ | :-------------------------------- |
+| id        | string  | No       | -       | The ID of the todo to complete    |
+| query     | string  | No       | -       | Search text to find a single todo |
+| completed | boolean | No       | true    | Set completion status             |
 
-**Returns:** The updated todo item.
+### delete_todo
 
-### `delete_todo`
-
-Delete a todo item. Requires either `id` or `query`.
+Delete a todo item. Provide either `id` or `query`.
 
 | Parameter | Type    | Required | Default | Description                             |
 | :-------- | :------ | :------- | :------ | :-------------------------------------- |
-| `id`      | string  | ❌       | -       | The ID of the todo to delete            |
-| `query`   | string  | ❌       | -       | Search text to find a single todo       |
-| `dryRun`  | boolean | ❌       | `false` | Simulate deletion without changing data |
+| id        | string  | No       | -       | The ID of the todo to delete            |
+| query     | string  | No       | -       | Search text to find a single todo       |
+| dryRun    | boolean | No       | false   | Simulate deletion without changing data |
 
-**Returns:** Summary of deleted item(s).
+## Data Model
 
-## 🔌 Client Configuration
+A todo item has the following shape:
+
+```json
+{
+  "id": "string",
+  "title": "string",
+  "description": "string?",
+  "completed": false,
+  "priority": "low|normal|high",
+  "dueDate": "YYYY-MM-DD?",
+  "tags": ["string"],
+  "createdAt": "ISO timestamp",
+  "updatedAt": "ISO timestamp?",
+  "completedAt": "ISO timestamp?"
+}
+```
+
+## Client Configuration
 
 <details>
 <summary><b>VS Code</b></summary>
@@ -205,7 +235,7 @@ Add this to your `claude_desktop_config.json`:
 
 </details>
 
-## 🛠️ Development
+## Development
 
 ### Prerequisites
 
@@ -213,28 +243,39 @@ Add this to your `claude_desktop_config.json`:
 
 ### Scripts
 
-| Command              | Description                              |
-| :------------------- | :--------------------------------------- |
-| `npm run build`      | Compile TypeScript to JavaScript         |
-| `npm run dev`        | Run server in watch mode for development |
-| `npm run test`       | Run tests                                |
-| `npm run lint`       | Run ESLint                               |
-| `npm run type-check` | Run TypeScript type checking             |
+| Command               | Description                                      |
+| :-------------------- | :----------------------------------------------- |
+| npm run build         | Compile TypeScript to JavaScript                 |
+| npm run dev           | Run server in watch mode for development         |
+| npm start             | Run the built server                             |
+| npm run test          | Run unit tests (node --test + tsx)               |
+| npm run test:coverage | Run unit tests with coverage                     |
+| npm run lint          | Run ESLint                                       |
+| npm run format        | Format with Prettier                             |
+| npm run type-check    | Run TypeScript type checking                     |
+| npm run bench         | Run benchmark suite                              |
+| npm run dup-check     | Run duplicate code checks (jscpd)                |
+| npm run inspector     | Launch the MCP inspector (use with node dist/..) |
 
-### Project Structure
+### Manual verification
 
-```text
-src/
-├── index.ts        # Entry point
-├── tools/          # Tool implementations
-├── schemas/        # Zod input/output schemas
-└── lib/            # Shared logic (storage, types, errors)
+```bash
+npm run build
+npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
-## 🤝 Contributing
+### Project structure
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+src/
+index.ts # MCP server entrypoint (stdio)
+tools/ # Tool registrations
+schemas/ # Zod input/output schemas
+lib/ # Storage, matching, shared helpers
 
-## 📄 License
+## Contributing
+
+Contributions are welcome. Please run `npm run format`, `npm run lint`, `npm run type-check`, and `npm run build` before opening a PR.
+
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
