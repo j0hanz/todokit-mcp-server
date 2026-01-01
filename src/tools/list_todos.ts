@@ -46,42 +46,24 @@ function isOverdue(todo: Todo, todayIso: string): boolean {
   return todo.dueDate < todayIso;
 }
 
-function compareStrings(a: string, b: string): number {
-  return a.localeCompare(b);
-}
-
-function compareDueDate(a: Todo, b: Todo): number {
-  const dateA = a.dueDate ?? MISSING_DUE_DATE;
-  const dateB = b.dueDate ?? MISSING_DUE_DATE;
-  return compareStrings(dateA, dateB);
-}
-
-function comparePriority(a: Todo, b: Todo): number {
-  return PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority];
-}
-
-function compareTitle(a: Todo, b: Todo): number {
-  return compareStrings(a.title, b.title);
-}
-
-function compareCreatedAt(a: Todo, b: Todo): number {
-  return compareStrings(a.createdAt, b.createdAt);
-}
-
 const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
-  dueDate: compareDueDate,
-  priority: comparePriority,
-  title: compareTitle,
-  createdAt: compareCreatedAt,
+  dueDate: (a, b) =>
+    (a.dueDate ?? MISSING_DUE_DATE).localeCompare(
+      b.dueDate ?? MISSING_DUE_DATE
+    ),
+  priority: (a, b) => PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority],
+  title: (a, b) => a.title.localeCompare(b.title),
+  createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
 };
 
 function sortTodos(todos: Todo[], sortBy: SortBy, order: SortOrder): Todo[] {
   const direction = order === 'desc' ? -1 : 1;
   const comparator = COMPARATORS[sortBy];
+
   return [...todos].sort((a, b) => {
-    const primary = comparator(a, b) * direction;
-    if (primary !== 0) return primary;
-    return compareCreatedAt(a, b);
+    const diff = comparator(a, b);
+    if (diff !== 0) return diff * direction;
+    return a.createdAt.localeCompare(b.createdAt);
   });
 }
 

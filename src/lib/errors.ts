@@ -9,31 +9,25 @@ export interface ErrorResponse {
   isError: true;
 }
 
-function extractFromError(error: unknown): string | undefined {
-  return error instanceof Error ? error.message : undefined;
+function normalizeMessage(message: unknown): string | undefined {
+  if (typeof message !== 'string' || message.length === 0) return undefined;
+  return message;
 }
 
-function extractFromString(error: unknown): string | undefined {
-  return typeof error === 'string' && error.length > 0 ? error : undefined;
-}
-
-function hasMessageProp(error: unknown): error is { message?: unknown } {
-  return Boolean(error && typeof error === 'object' && 'message' in error);
-}
-
-function extractFromMessageProp(error: unknown): string | undefined {
-  if (!hasMessageProp(error)) return undefined;
-  const msg = error.message;
-  return typeof msg === 'string' && msg.length > 0 ? msg : undefined;
+function extractMessageObject(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('message' in error))
+    return undefined;
+  return normalizeMessage((error as { message: unknown }).message);
 }
 
 export function getErrorMessage(error: unknown): string {
-  return (
-    extractFromError(error) ??
-    extractFromString(error) ??
-    extractFromMessageProp(error) ??
-    'Unknown error'
-  );
+  if (error instanceof Error) {
+    const message = normalizeMessage(error.message);
+    if (message) return message;
+  }
+  const directMessage = normalizeMessage(error);
+  if (directMessage) return directMessage;
+  return extractMessageObject(error) ?? 'Unknown error';
 }
 
 export function createErrorResponse(

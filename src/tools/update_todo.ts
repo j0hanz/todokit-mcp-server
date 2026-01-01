@@ -12,110 +12,102 @@ import { UpdateTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
 
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
-type TagOps = UpdateTodoInput['tagOps'];
 type UpdateFields = Omit<
   UpdateTodoInput,
   'id' | 'query' | 'clearFields' | 'tagOps'
 >;
-
 type ClearField = NonNullable<UpdateTodoInput['clearFields']>[number];
 
-function applyClearFields(
-  updates: UpdateFields,
-  fieldsToClear: Set<ClearField>
-): void {
-  if (fieldsToClear.has('description')) {
-    updates.description = undefined;
-  }
-  if (fieldsToClear.has('dueDate')) {
-    updates.dueDate = undefined;
-  }
+function normalizeTagOps(tagOps: UpdateTodoInput['tagOps']): {
+  add: string[];
+  remove: Set<string>;
+} {
+  return {
+    add: normalizeTags(tagOps?.add ?? []),
+    remove: new Set(normalizeTags(tagOps?.remove ?? [])),
+  };
 }
 
-function countTags(tags?: string[]): number {
-  return tags?.length ?? 0;
+function getTagOps(tagOps?: UpdateTodoInput['tagOps']): {
+  add: string[];
+  remove: Set<string>;
+} | null {
+  if (!tagOps) return null;
+  const { add, remove } = normalizeTagOps(tagOps);
+  if (add.length === 0 && remove.size === 0) return null;
+  return { add, remove };
 }
 
-function hasTagOps(tagOps?: TagOps): boolean {
-  return countTags(tagOps?.add) + countTags(tagOps?.remove) > 0;
-}
-
-function shouldApplyTagUpdates(
-  updates: UpdateFields,
-  fieldsToClear: Set<ClearField>,
-  tagOps?: TagOps
-): boolean {
-  if (updates.tags !== undefined) return false;
-  return fieldsToClear.has('tags') || hasTagOps(tagOps);
-}
-
-function resolveBaseTags(
-  baseTodo: Todo,
-  fieldsToClear: Set<ClearField>
+function mergeTags(
+  current: string[],
+  ops: { add: string[]; remove: Set<string> } | null
 ): string[] {
-  return fieldsToClear.has('tags') ? [] : baseTodo.tags;
+  const toAdd = ops?.add ?? [];
+  const toRemove = ops?.remove ?? new Set();
+  return normalizeTags([...current, ...toAdd]).filter((t) => !toRemove.has(t));
 }
 
-function normalizeTagList(tags?: string[]): string[] {
-  return normalizeTags(tags ?? []);
+function resolveTags(
+  baseTags: string[],
+  clears: Set<ClearField>,
+  tagOps?: UpdateTodoInput['tagOps'],
+  newTags?: string[]
+): string[] | undefined {
+  if (newTags !== undefined) return newTags;
+
+  const shouldClear = clears.has('tags');
+  const ops = getTagOps(tagOps);
+
+  if (!shouldClear && !ops) return undefined;
+  return mergeTags(shouldClear ? [] : baseTags, ops);
 }
 
-function buildMergedTags(
-  baseTodo: Todo,
-  fieldsToClear: Set<ClearField>,
-  tagOps?: TagOps
-): string[] {
-  const baseTags = resolveBaseTags(baseTodo, fieldsToClear);
-  const addTags = normalizeTagList(tagOps?.add);
-  const removeTags = new Set(normalizeTagList(tagOps?.remove));
-  return normalizeTags([...baseTags, ...addTags]).filter(
-    (tag) => !removeTags.has(tag)
-  );
-}
-
-function applyTagUpdates(
+function assignContentFields(
   updates: UpdateFields,
-  baseTodo: Todo,
-  fieldsToClear: Set<ClearField>,
-  tagOps?: TagOps
+  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
 ): void {
-  if (!shouldApplyTagUpdates(updates, fieldsToClear, tagOps)) return;
-  updates.tags = buildMergedTags(baseTodo, fieldsToClear, tagOps);
+  if (fields.title !== undefined) updates.title = fields.title;
+  if (fields.description !== undefined)
+    updates.description = fields.description;
 }
 
-function assignIfDefined<K extends keyof UpdateFields>(
+function assignStatusFields(
   updates: UpdateFields,
-  key: K,
-  value: UpdateFields[K]
+  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
 ): void {
-  if (value !== undefined) {
-    updates[key] = value;
-  }
+  if (fields.completed !== undefined) updates.completed = fields.completed;
+  if (fields.priority !== undefined) updates.priority = fields.priority;
+  if (fields.dueDate !== undefined) updates.dueDate = fields.dueDate;
 }
 
-function buildBaseUpdates(input: UpdateTodoInput): UpdateFields {
-  const updates: UpdateFields = {};
-  assignIfDefined(updates, 'title', input.title);
-  assignIfDefined(updates, 'description', input.description);
-  assignIfDefined(updates, 'completed', input.completed);
-  assignIfDefined(updates, 'priority', input.priority);
-  assignIfDefined(updates, 'dueDate', input.dueDate);
-  assignIfDefined(updates, 'tags', input.tags);
-  return updates;
+function assignFields(
+  updates: UpdateFields,
+  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
+): void {
+  assignContentFields(updates, fields);
+  assignStatusFields(updates, fields);
+}
+
+function applyClears(updates: UpdateFields, clears: Set<ClearField>): void {
+  if (clears.has('description')) updates.description = undefined;
+  if (clears.has('dueDate')) updates.dueDate = undefined;
 }
 
 function buildUpdatePayload(
   baseTodo: Todo,
   input: UpdateTodoInput
 ): UpdateFields | null {
-  const { clearFields, tagOps } = input;
-  const fieldsToClear = new Set<ClearField>(clearFields ?? []);
-  const nextUpdates = buildBaseUpdates(input);
+  const { clearFields = [], tagOps, ...fields } = input;
+  const clears = new Set(clearFields);
+  const updates: UpdateFields = {};
 
-  applyClearFields(nextUpdates, fieldsToClear);
-  applyTagUpdates(nextUpdates, baseTodo, fieldsToClear, tagOps);
+  assignFields(updates, fields);
+  applyClears(updates, clears);
 
-  return Object.keys(nextUpdates).length > 0 ? nextUpdates : null;
+  const resolvedTags = resolveTags(baseTodo.tags, clears, tagOps, fields.tags);
+  if (resolvedTags !== undefined) updates.tags = resolvedTags;
+
+  return Object.keys(updates).length > 0 ? updates : null;
 }
 
 async function handleUpdateTodo(

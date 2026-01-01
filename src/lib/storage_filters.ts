@@ -20,23 +20,11 @@ export function normalizeTags(tags: string[]): string[] {
   return Array.from(new Set(normalized));
 }
 
-function matchesQuery(todo: Todo, query: string): boolean {
-  const haystack = `${todo.title} ${todo.description ?? ''} ${todo.tags.join(
-    ' '
-  )}`.toLowerCase();
-  return haystack.includes(query);
-}
-
-function normalizeQuery(query?: string): string | undefined {
-  const trimmed = query?.trim().toLowerCase();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
-}
-
 function matchesCompleted(todo: Todo, completed?: boolean): boolean {
   return completed === undefined || todo.completed === completed;
 }
 
-function matchesPriority(todo: Todo, priority?: Todo['priority']): boolean {
+function matchesPriority(todo: Todo, priority?: string): boolean {
   return !priority || todo.priority === priority;
 }
 
@@ -44,55 +32,45 @@ function matchesTag(todo: Todo, tag?: string): boolean {
   return !tag || todo.tags.includes(tag);
 }
 
-function matchesDueBefore(todo: Todo, dueBefore?: string): boolean {
-  return !dueBefore || Boolean(todo.dueDate && todo.dueDate < dueBefore);
-}
-
-function matchesDueAfter(todo: Todo, dueAfter?: string): boolean {
-  return !dueAfter || Boolean(todo.dueDate && todo.dueDate > dueAfter);
-}
-
-function matchesQueryTerm(todo: Todo, query?: string): boolean {
-  return !query || matchesQuery(todo, query);
-}
-
-function matchesBasicFilters(
-  todo: Todo,
-  f: TodoFilters,
-  tag?: string
-): boolean {
+function matchesBasic(todo: Todo, filters: TodoFilters, tag?: string): boolean {
   return (
-    matchesCompleted(todo, f.completed) &&
-    matchesPriority(todo, f.priority) &&
+    matchesCompleted(todo, filters.completed) &&
+    matchesPriority(todo, filters.priority) &&
     matchesTag(todo, tag)
   );
 }
 
-function matchesDateAndQuery(
-  todo: Todo,
-  f: TodoFilters,
-  query?: string
-): boolean {
+function matchesDueBefore(todo: Todo, date?: string): boolean {
+  return !date || (!!todo.dueDate && todo.dueDate < date);
+}
+
+function matchesDueAfter(todo: Todo, date?: string): boolean {
+  return !date || (!!todo.dueDate && todo.dueDate > date);
+}
+
+function matchesDate(todo: Todo, filters: TodoFilters): boolean {
   return (
-    matchesQueryTerm(todo, query) &&
-    matchesDueBefore(todo, f.dueBefore) &&
-    matchesDueAfter(todo, f.dueAfter)
+    matchesDueBefore(todo, filters.dueBefore) &&
+    matchesDueAfter(todo, filters.dueAfter)
   );
 }
 
-function todoMatches(
-  todo: Todo,
-  f: TodoFilters,
-  tag?: string,
-  query?: string
-): boolean {
-  return (
-    matchesBasicFilters(todo, f, tag) && matchesDateAndQuery(todo, f, query)
-  );
+function matchesQuery(todo: Todo, query?: string): boolean {
+  if (!query) return true;
+  const haystack = `${todo.title} ${todo.description ?? ''} ${todo.tags.join(
+    ' '
+  )}`.toLowerCase();
+  return haystack.includes(query);
 }
 
 export function filterTodos(todos: Todo[], filters: TodoFilters): Todo[] {
+  const query = filters.query?.trim().toLowerCase();
   const tag = filters.tag ? normalizeTag(filters.tag) : undefined;
-  const query = normalizeQuery(filters.query);
-  return todos.filter((todo) => todoMatches(todo, filters, tag, query));
+
+  return todos.filter(
+    (todo) =>
+      matchesBasic(todo, filters, tag) &&
+      matchesDate(todo, filters) &&
+      matchesQuery(todo, query)
+  );
 }
