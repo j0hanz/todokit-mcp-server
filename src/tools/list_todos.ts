@@ -36,8 +36,16 @@ const PRIORITY_WEIGHT: Record<Todo['priority'], number> = {
 };
 const MISSING_DUE_DATE = '9999-12-31';
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
 function getTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = pad2(now.getMonth() + 1);
+  const day = pad2(now.getDate());
+  return `${year}-${month}-${day}`;
 }
 
 function isOverdue(todo: Todo, todayIso: string): boolean {

@@ -163,6 +163,10 @@ Result fields:
 - `limit`
 - `offset`
 
+Notes:
+
+- Overdue calculations compare `dueDate` against the server's local calendar date (YYYY-MM-DD).
+
 ### update_todo
 
 Update fields on a todo item. Provide either `id` or `query` to identify the todo.

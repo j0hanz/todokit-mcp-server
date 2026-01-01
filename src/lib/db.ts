@@ -130,7 +130,9 @@ export async function withTodos<T>(
     const path = getTodoFilePath();
     const current = await loadTodos(path);
     const { todos, result } = mutate(current);
-    await saveTodos(path, todos);
+    if (todos !== current) {
+      await saveTodos(path, todos);
+    }
     return result;
   });
 }

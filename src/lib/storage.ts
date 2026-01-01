@@ -30,6 +30,42 @@ interface NewTodoInput {
   tags?: string[];
 }
 
+function normalizeUpdates(updates: TodoUpdate): TodoUpdate {
+  if (!updates.tags) return updates;
+  return { ...updates, tags: normalizeTags(updates.tags) };
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
+
+function valuesEqual(current: unknown, update: unknown): boolean {
+  if (isStringArray(update) && isStringArray(current)) {
+    return areStringArraysEqual(update, current);
+  }
+  return Object.is(current, update);
+}
+
+function hasChanges(current: Todo, updates: TodoUpdate): boolean {
+  for (const [key, value] of Object.entries(updates)) {
+    const currentValue = current[key as keyof Todo];
+    if (!valuesEqual(currentValue, value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function getAllTodos(): Promise<Todo[]> {
   return readTodos();
 }
@@ -78,14 +114,7 @@ export function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
   });
 }
 
-function calculateUpdatedTodo(
-  current: Todo,
-  updates: Partial<Omit<Todo, 'id' | 'createdAt'>>
-): Todo {
-  if (updates.tags) {
-    updates.tags = normalizeTags(updates.tags);
-  }
-
+function calculateUpdatedTodo(current: Todo, updates: TodoUpdate): Todo {
   const updatedTodo = {
     ...current,
     ...updates,
@@ -103,24 +132,34 @@ function calculateUpdatedTodo(
   return updatedTodo;
 }
 
+function applyUpdateToTodos(
+  todos: Todo[],
+  id: string,
+  updates: TodoUpdate
+): { todos: Todo[]; result: Todo | null } {
+  const index = todos.findIndex((todo) => todo.id === id);
+  if (index < 0) {
+    return { todos, result: null };
+  }
+  const current = todos[index];
+  if (!current) {
+    return { todos, result: null };
+  }
+  const normalizedUpdates = normalizeUpdates(updates);
+  if (!hasChanges(current, normalizedUpdates)) {
+    return { todos, result: current };
+  }
+  const updatedTodo = calculateUpdatedTodo(current, normalizedUpdates);
+  const nextTodos = [...todos];
+  nextTodos[index] = updatedTodo;
+  return { todos: nextTodos, result: updatedTodo };
+}
+
 export function updateTodo(
   id: string,
-  updates: Partial<Omit<Todo, 'id' | 'createdAt'>>
+  updates: TodoUpdate
 ): Promise<Todo | null> {
-  return withTodos((todos) => {
-    const index = todos.findIndex((todo) => todo.id === id);
-    if (index < 0) {
-      return { todos, result: null };
-    }
-    const current = todos[index];
-    if (!current) {
-      return { todos, result: null };
-    }
-    const updatedTodo = calculateUpdatedTodo(current, updates);
-    const nextTodos = [...todos];
-    nextTodos[index] = updatedTodo;
-    return { todos: nextTodos, result: updatedTodo };
-  });
+  return withTodos((todos) => applyUpdateToTodos(todos, id, updates));
 }
 
 export function deleteTodo(id: string): Promise<boolean> {
@@ -136,54 +175,80 @@ export async function updateTodoBySelector(
   input: ResolveTodoInput,
   buildUpdates: (todo: Todo) => TodoUpdate | null
 ): Promise<UpdateTodoOutcome> {
-  const todos = await getAllTodos();
-  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-  if (outcome.kind !== 'match') {
-    return outcome;
-  }
+  return withTodos<UpdateTodoOutcome>((todos) => {
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+    if (outcome.kind !== 'match') {
+      return { todos, result: outcome };
+    }
 
-  const updates = buildUpdates(outcome.todo);
-  if (!updates || Object.keys(updates).length === 0) {
-    return { kind: 'no_updates' };
-  }
+    const updates = buildUpdates(outcome.todo);
+    if (!updates || Object.keys(updates).length === 0) {
+      return { todos, result: { kind: 'no_updates' } };
+    }
 
-  const updated = await updateTodo(outcome.todo.id, updates);
-  if (!updated) {
-    return createNotFoundOutcome(outcome.todo.id);
-  }
+    const updated = applyUpdateToTodos(todos, outcome.todo.id, updates);
+    if (!updated.result) {
+      return {
+        todos,
+        result: createNotFoundOutcome(outcome.todo.id),
+      };
+    }
 
-  return { kind: 'match', todo: updated };
+    return {
+      todos: updated.todos,
+      result: { kind: 'match', todo: updated.result },
+    };
+  });
 }
 
 export async function deleteTodoBySelector(
   input: ResolveTodoInput
 ): Promise<MatchOutcome> {
-  const todos = await getAllTodos();
-  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-  if (outcome.kind !== 'match') return outcome;
+  return withTodos<MatchOutcome>((todos) => {
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+    if (outcome.kind !== 'match') {
+      return { todos, result: outcome };
+    }
 
-  const deleted = await deleteTodo(outcome.todo.id);
-  if (!deleted) {
-    return createNotFoundOutcome(outcome.todo.id);
-  }
+    const remaining = todos.filter((todo) => todo.id !== outcome.todo.id);
+    if (remaining.length === todos.length) {
+      return {
+        todos,
+        result: createNotFoundOutcome(outcome.todo.id),
+      };
+    }
 
-  return { kind: 'match', todo: outcome.todo };
+    return { todos: remaining, result: { kind: 'match', todo: outcome.todo } };
+  });
 }
 
 export async function completeTodoBySelector(
   input: ResolveTodoInput,
   completed: boolean
 ): Promise<CompleteTodoOutcome> {
-  const todos = await getAllTodos();
-  const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-  if (outcome.kind !== 'match') return outcome;
+  return withTodos<CompleteTodoOutcome>((todos) => {
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+    if (outcome.kind !== 'match') {
+      return { todos, result: outcome };
+    }
 
-  const updated = await updateTodo(outcome.todo.id, { completed });
-  if (!updated) {
-    return createNotFoundOutcome(outcome.todo.id);
-  }
+    if (outcome.todo.completed === completed) {
+      return { todos, result: { kind: 'already', todo: outcome.todo } };
+    }
 
-  return { kind: 'match', todo: updated };
+    const updated = applyUpdateToTodos(todos, outcome.todo.id, { completed });
+    if (!updated.result) {
+      return {
+        todos,
+        result: createNotFoundOutcome(outcome.todo.id),
+      };
+    }
+
+    return {
+      todos: updated.todos,
+      result: { kind: 'match', todo: updated.result },
+    };
+  });
 }
 
 export function deleteTodosByIds(ids: string[]): Promise<string[]> {

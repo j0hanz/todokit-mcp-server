@@ -9,6 +9,7 @@ import { registerAddTodo } from '../src/tools/add_todo.js';
 import { registerAddTodos } from '../src/tools/add_todos.js';
 import { registerCompleteTodo } from '../src/tools/complete_todo.js';
 import { registerDeleteTodo } from '../src/tools/delete_todo.js';
+import { registerDeleteTodos } from '../src/tools/delete_todos.js';
 import { registerAllTools } from '../src/tools/index.js';
 import { registerListTodos } from '../src/tools/list_todos.js';
 import { registerUpdateTodo } from '../src/tools/update_todo.js';
@@ -61,6 +62,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       'update_todo',
       'complete_todo',
       'delete_todo',
+      'delete_todos',
     ];
     for (const name of names) {
       assert.doesNotThrow(() => getHandler(name));
@@ -238,15 +240,68 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
     const completeResult = await completeHandler({ id: todo.id });
     assert.equal(getStructured(completeResult)?.ok, true);
+    const completeStructured = getStructured(completeResult)?.result as Record<
+      string,
+      unknown
+    >;
+    const completeItem = completeStructured.item as {
+      updatedAt?: string;
+    };
 
     const alreadyResult = await completeHandler({ id: todo.id });
     assert.equal(getStructured(alreadyResult)?.ok, true);
+    const alreadyStructured = getStructured(alreadyResult)?.result as Record<
+      string,
+      unknown
+    >;
+    const alreadyItem = alreadyStructured.item as {
+      updatedAt?: string;
+    };
+    assert.equal(alreadyItem.updatedAt, completeItem.updatedAt);
+    assert.match(String(alreadyStructured.summary ?? ''), /already completed/i);
 
     const reopenResult = await completeHandler({
       id: todo.id,
       completed: false,
     });
     assert.equal(getStructured(reopenResult)?.ok, true);
+  });
+
+  it('deletes todos in bulk with filters', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerDeleteTodos(server);
+
+    await addTodo('Keep Me');
+    await addTodo('Batch One');
+    await addTodo('Batch Two');
+
+    const deleteHandler = getHandler<{
+      query: string;
+      dryRun?: boolean;
+      limit?: number;
+    }>('delete_todos');
+
+    const dryRunResult = await deleteHandler({ query: 'Batch', dryRun: true });
+    const dryRunStructured = getStructured(dryRunResult)?.result as Record<
+      string,
+      unknown
+    >;
+    assert.equal(dryRunStructured.dryRun, true);
+
+    const liveResult = await deleteHandler({ query: 'Batch', limit: 1 });
+    const liveStructured = getStructured(liveResult)?.result as Record<
+      string,
+      unknown
+    >;
+    assert.equal((liveStructured.deletedIds as unknown[]).length, 1);
+
+    const remaining = await getTodos();
+    const remainingTitles = remaining.map((item) => item.title);
+    assert.equal(remainingTitles.includes('Keep Me'), true);
+    assert.equal(
+      remainingTitles.filter((title) => title.startsWith('Batch')).length,
+      1
+    );
   });
 
   it('supports delete dry-run on ambiguous matches', async () => {
