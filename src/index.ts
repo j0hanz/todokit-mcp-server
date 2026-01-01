@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { closeDb } from './lib/db.js';
 import { registerAllTools } from './tools/index.js';
 
 const require = createRequire(import.meta.url);
@@ -28,14 +29,20 @@ export function createServer(): McpServer {
 }
 
 export async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (shuttingDown) {
-    return;
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  try {
+    await closeDb();
+  } catch (error: unknown) {
+    console.error('Error closing database:', error);
   }
+
   if (!activeServer) {
     process.exitCode = 0;
     return;
   }
-  shuttingDown = true;
+
   try {
     await activeServer.close();
   } catch (error: unknown) {
@@ -51,6 +58,16 @@ export async function startServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await activeServer.connect(transport);
 }
+
+process.on('unhandledRejection', (reason: unknown) => {
+  console.error('Unhandled rejection:', reason);
+  process.exitCode = 1;
+});
+
+process.on('uncaughtException', (error: Error) => {
+  console.error('Uncaught exception:', error);
+  process.exitCode = 1;
+});
 
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {

@@ -8,6 +8,9 @@ import { type Todo, TodosSchema } from './types.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TODO_FILE = join(__dirname, '../../todos.json');
 
+const IO_TIMEOUT_MS = 10_000;
+const WRITE_TIMEOUT_MS = 30_000;
+
 interface TodoCache {
   todos: Todo[];
   mtimeMs: number | null;
@@ -38,6 +41,10 @@ function isTransientError(error: unknown): boolean {
   return code !== undefined && TRANSIENT_ERROR_CODES.has(code);
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 function noop(): void {
   // Intentionally empty
 }
@@ -59,24 +66,50 @@ function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.name = 'AbortError';
+      reject(error);
+    }, ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 async function getFileMtime(path: string): Promise<number | null> {
   try {
-    return (await stat(path)).mtimeMs;
+    const stats = await withTimeout(
+      stat(path),
+      IO_TIMEOUT_MS,
+      'File stat timed out'
+    );
+    return stats.mtimeMs;
   } catch (error) {
-    if (isNotFoundError(error)) {
-      return null;
-    }
+    if (isNotFoundError(error)) return null;
+    if (isAbortError(error)) throw error;
     throw error;
   }
 }
 
 async function readFileIfExists(path: string): Promise<string | null> {
   try {
-    return await readFile(path, 'utf8');
+    return await readFile(path, {
+      encoding: 'utf8',
+      signal: AbortSignal.timeout(IO_TIMEOUT_MS),
+    });
   } catch (error) {
-    if (isNotFoundError(error)) {
-      return null;
-    }
+    if (isNotFoundError(error)) return null;
+    if (isAbortError(error)) throw new Error('File read timed out');
     throw error;
   }
 }
@@ -123,7 +156,11 @@ async function writeFileAtomic(path: string, contents: string): Promise<void> {
   const tempPath = `${path}.${randomUUID()}.tmp`;
 
   try {
-    await writeFile(tempPath, contents, { encoding: 'utf8', flush: true });
+    await writeFile(tempPath, contents, {
+      encoding: 'utf8',
+      flush: true,
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    });
     await renameWithRetry(tempPath, path);
   } finally {
     await rm(tempPath, { force: true }).catch(noop);
