@@ -172,3 +172,22 @@ export async function completeTodoBySelector(
     return result;
   });
 }
+
+export async function deleteTodosByIds(ids: string[]): Promise<string[]> {
+  return queueWrite(async () => {
+    const todos = await readTodosFromDisk();
+    const idSet = new Set(ids);
+    const deletedIds: string[] = [];
+
+    const remaining = todos.filter((todo) => {
+      if (idSet.has(todo.id)) {
+        deletedIds.push(todo.id);
+        return false;
+      }
+      return true;
+    });
+
+    await persistTodos(remaining);
+    return deletedIds;
+  });
+}

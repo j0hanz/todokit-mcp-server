@@ -177,6 +177,7 @@ async function handleListTodos(
   const sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
   const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
   const summary = buildSummary(counts, paged.length);
+  const hasMore = normalized.offset + paged.length < counts.total;
 
   return createToolResponse({
     ok: true,
@@ -191,6 +192,7 @@ async function handleListTodos(
       },
       limit: normalized.limit,
       offset: normalized.offset,
+      hasMore,
     },
   });
 }
