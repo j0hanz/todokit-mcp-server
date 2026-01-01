@@ -5,7 +5,6 @@ import type { z } from 'zod';
 
 import { createErrorResponse, getErrorMessage } from '../lib/errors.js';
 import {
-  type MatchOutcome,
   resolveTodoTargetFromTodos,
   toResolveInput,
   unwrapResolution,
@@ -17,19 +16,6 @@ import { DeleteTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
 
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
-
-type AmbiguousOutcome = Extract<MatchOutcome, { kind: 'ambiguous' }>;
-
-function buildDryRunSingle(todo: Todo): CallToolResult {
-  return createToolResponse({
-    ok: true,
-    result: {
-      deletedIds: [todo.id],
-      summary: `Dry run: would delete todo "${todo.title}"`,
-      dryRun: true,
-    },
-  });
-}
 
 function buildDryRunMultiple(
   previews: unknown[],
@@ -47,32 +33,17 @@ function buildDryRunMultiple(
   });
 }
 
-function buildDeleteSuccess(todo: Todo): CallToolResult {
+function buildDeleteResponse(todo: Todo, dryRun: boolean): CallToolResult {
   return createToolResponse({
     ok: true,
     result: {
       deletedIds: [todo.id],
-      summary: `Deleted todo "${todo.title}"`,
-      nextActions: ['list_todos'],
+      summary: dryRun
+        ? `Dry run: would delete todo "${todo.title}"`
+        : `Deleted todo "${todo.title}"`,
+      ...(dryRun ? { dryRun: true } : { nextActions: ['list_todos'] }),
     },
   });
-}
-
-function handleAmbiguousDelete(
-  outcome: AmbiguousOutcome,
-  dryRun: boolean
-): CallToolResult {
-  if (dryRun) {
-    return buildDryRunMultiple(outcome.previews, outcome.matches.length);
-  }
-  return outcome.response;
-}
-
-function handleMatchDelete(todo: Todo, dryRun: boolean): CallToolResult {
-  if (dryRun) {
-    return buildDryRunSingle(todo);
-  }
-  return buildDeleteSuccess(todo);
 }
 
 async function handleDeleteTodoDryRun(
@@ -87,9 +58,9 @@ async function handleDeleteTodoDryRun(
   );
   if (outcome.kind === 'error') return outcome.response;
   if (outcome.kind === 'ambiguous') {
-    return handleAmbiguousDelete(outcome, true);
+    return buildDryRunMultiple(outcome.previews, outcome.matches.length);
   }
-  return handleMatchDelete(outcome.todo, true);
+  return buildDeleteResponse(outcome.todo, true);
 }
 
 async function handleDeleteTodoLive(
@@ -101,8 +72,7 @@ async function handleDeleteTodoLive(
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }
-
-  return handleMatchDelete(outcome.todo, false);
+  return buildDeleteResponse(outcome.todo, false);
 }
 
 async function handleDeleteTodo(

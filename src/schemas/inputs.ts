@@ -5,7 +5,6 @@ import { IsoDateSchema } from './iso_date.js';
 const TagSchema = z.string().min(1).max(50);
 const SortBySchema = z.enum(['dueDate', 'priority', 'createdAt', 'title']);
 const SortOrderSchema = z.enum(['asc', 'desc']);
-
 const TodoInputSchema = z
   .object({
     title: z.string().min(1).max(200).describe('The title of the todo'),

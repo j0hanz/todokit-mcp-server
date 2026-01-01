@@ -12,26 +12,17 @@ export interface TodoMatchPreview {
 
 const PREVIEW_LIMIT = 5;
 
-function buildMatchPreview(todo: Todo): TodoMatchPreview {
-  return {
+function buildMatchPreviews(
+  todos: Todo[],
+  limit: number = PREVIEW_LIMIT
+): TodoMatchPreview[] {
+  return todos.slice(0, limit).map((todo) => ({
     id: todo.id,
     title: todo.title,
     priority: todo.priority,
     dueDate: todo.dueDate,
     completed: todo.completed,
-  };
-}
-
-function buildMatchPreviews(
-  todos: Todo[],
-  limit: number = PREVIEW_LIMIT
-): TodoMatchPreview[] {
-  return todos.slice(0, limit).map(buildMatchPreview);
-}
-
-function normalizeQueryInput(query: string): string | null {
-  const trimmedQuery = query.trim();
-  return trimmedQuery.length > 0 ? trimmedQuery : null;
+  }));
 }
 
 export type ResolveTodoInput =
@@ -124,8 +115,8 @@ function resolveByQueryFromTodos(
   todos: Todo[],
   query: string
 ): ResolveTodoResult {
-  const trimmedQuery = normalizeQueryInput(query);
-  if (!trimmedQuery) {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery.length === 0) {
     return { kind: 'missing', response: createMissingIdentifierError() };
   }
   const matches = filterTodos(todos, { query: trimmedQuery });
@@ -136,9 +127,9 @@ function resolveQueryMatches(
   query: string,
   matches: Todo[]
 ): ResolveTodoResult {
-  const singleMatch = matches.length === 1 ? matches[0] : null;
-  if (singleMatch) {
-    return { kind: 'match', todo: singleMatch };
+  const [firstMatch] = matches;
+  if (matches.length === 1 && firstMatch) {
+    return { kind: 'match', todo: firstMatch };
   }
   if (matches.length === 0) {
     return { kind: 'not_found', response: createNotFoundError(query) };

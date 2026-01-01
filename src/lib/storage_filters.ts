@@ -14,7 +14,6 @@ function normalizeTag(tag: string): string {
 }
 
 export function normalizeTags(tags: string[]): string[] {
-  if (tags.length === 0) return [];
   const normalized = tags
     .map((tag) => normalizeTag(tag))
     .filter((tag) => tag.length > 0);
@@ -98,7 +97,6 @@ function todoMatches(todo: Todo, filters: NormalizedFilters): boolean {
 }
 
 export function filterTodos(todos: Todo[], filters: TodoFilters): Todo[] {
-  if (todos.length === 0) return [];
   const normalized = normalizeFilters(filters);
   return todos.filter((todo) => todoMatches(todo, normalized));
 }

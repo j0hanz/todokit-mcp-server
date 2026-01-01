@@ -40,16 +40,6 @@ function getTodayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function isOutOfOrder(
-  prev: Todo | undefined,
-  current: Todo | undefined
-): boolean {
-  if (!prev || !current) {
-    return false;
-  }
-  return prev.createdAt > current.createdAt;
-}
-
 function isOverdue(todo: Todo, todayIso: string): boolean {
   if (!todo.dueDate) return false;
   if (todo.completed) return false;
@@ -60,12 +50,10 @@ function compareStrings(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-function getDueDateKey(todo: Todo): string {
-  return todo.dueDate ?? MISSING_DUE_DATE;
-}
-
 function compareDueDate(a: Todo, b: Todo): number {
-  return compareStrings(getDueDateKey(a), getDueDateKey(b));
+  const dateA = a.dueDate ?? MISSING_DUE_DATE;
+  const dateB = b.dueDate ?? MISSING_DUE_DATE;
+  return compareStrings(dateA, dateB);
 }
 
 function comparePriority(a: Todo, b: Todo): number {
@@ -97,51 +85,6 @@ function sortTodos(todos: Todo[], sortBy: SortBy, order: SortOrder): Todo[] {
   });
 }
 
-function isSortedByCreatedAtAsc(todos: Todo[]): boolean {
-  for (let index = 1; index < todos.length; index += 1) {
-    const prev = todos[index - 1];
-    const current = todos[index];
-    if (isOutOfOrder(prev, current)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function maybeSortTodos(
-  todos: Todo[],
-  sortBy: SortBy,
-  order: SortOrder
-): Todo[] {
-  if (sortBy !== 'createdAt' || order !== 'asc') {
-    return sortTodos(todos, sortBy, order);
-  }
-  return isSortedByCreatedAtAsc(todos)
-    ? todos
-    : sortTodos(todos, sortBy, order);
-}
-
-function normalizeQuery(query?: string): string | undefined {
-  const trimmed = query?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
-}
-
-function resolveSortBy(sortBy?: SortBy): SortBy {
-  return sortBy ?? 'createdAt';
-}
-
-function resolveOrder(order?: SortOrder): SortOrder {
-  return order ?? 'asc';
-}
-
-function resolveLimit(limit?: number): number {
-  return limit ?? DEFAULT_LIMIT;
-}
-
-function resolveOffset(offset?: number): number {
-  return offset ?? DEFAULT_OFFSET;
-}
-
 function resolveCompletedFilter(
   status: ListTodosFilters['status'],
   completed: ListTodosFilters['completed']
@@ -158,11 +101,11 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
     tag: filters.tag,
     dueBefore: filters.dueBefore,
     dueAfter: filters.dueAfter,
-    query: normalizeQuery(filters.query),
-    sortBy: resolveSortBy(filters.sortBy),
-    order: resolveOrder(filters.order),
-    limit: resolveLimit(filters.limit),
-    offset: resolveOffset(filters.offset),
+    query: filters.query,
+    sortBy: filters.sortBy ?? 'createdAt',
+    order: filters.order ?? 'asc',
+    limit: filters.limit ?? DEFAULT_LIMIT,
+    offset: filters.offset ?? DEFAULT_OFFSET,
   };
 }
 
@@ -231,7 +174,7 @@ async function handleListTodos(
 
   const todayIso = getTodayIso();
   const counts = computeCounts(allTodos, todayIso);
-  const sorted = maybeSortTodos(allTodos, normalized.sortBy, normalized.order);
+  const sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
   const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
   const summary = buildSummary(counts, paged.length);
 

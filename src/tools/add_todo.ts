@@ -22,15 +22,14 @@ export function registerAddTodo(server: McpServer): void {
     async ({ title, description, priority, dueDate, tags }) => {
       try {
         const todo = await addTodo(title, description, priority, dueDate, tags);
-        const structured = {
+        return createToolResponse({
           ok: true,
           result: {
             item: todo,
             summary: `Added todo "${todo.title}"`,
             nextActions: ['list_todos', 'update_todo', 'complete_todo'],
           },
-        };
-        return createToolResponse(structured);
+        });
       } catch (err) {
         return createErrorResponse('E_ADD_TODO', getErrorMessage(err));
       }

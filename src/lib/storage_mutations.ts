@@ -13,40 +13,20 @@ function normalizeUpdateTags(updates: TodoUpdate): TodoUpdate {
   return normalizedUpdates;
 }
 
-function resolveCompletedChange(
-  completed: boolean,
-  updates: TodoUpdate,
-  now: string
-): Pick<Todo, 'completed' | 'completedAt'> {
-  return {
-    completed,
-    completedAt: completed ? (updates.completedAt ?? now) : undefined,
-  };
-}
-
-function resolveCompletedAtChange(
-  completed: boolean,
-  updates: TodoUpdate
-): Pick<Todo, 'completed' | 'completedAt'> {
-  return {
-    completed,
-    completedAt: updates.completedAt,
-  };
-}
-
 function resolveCompletionUpdate(
   currentTodo: Todo,
   updates: TodoUpdate,
   now: string
 ): Pick<Todo, 'completed' | 'completedAt'> {
   const completed = updates.completed ?? currentTodo.completed;
-  if (updates.completed !== undefined) {
-    return resolveCompletedChange(completed, updates, now);
-  }
-  if (updates.completedAt !== undefined) {
-    return resolveCompletedAtChange(completed, updates);
-  }
-  return { completed, completedAt: currentTodo.completedAt };
+  const completedAt =
+    updates.completedAt ??
+    (updates.completed !== undefined
+      ? completed
+        ? now
+        : undefined
+      : currentTodo.completedAt);
+  return { completed, completedAt };
 }
 
 function buildUpdatedTodo(currentTodo: Todo, updates: TodoUpdate): Todo {
@@ -93,15 +73,6 @@ export function createNotFoundOutcome(id: string): MatchOutcome {
   };
 }
 
-function findTodoById(todos: Todo[], id: string): Todo | null {
-  const match = todos.find((todo) => todo.id === id);
-  return match ?? null;
-}
-
-function getCompletionTimestamp(completed: boolean): string | undefined {
-  return completed ? new Date().toISOString() : undefined;
-}
-
 export type CompleteTodoOutcome =
   | MatchOutcome
   | { kind: 'already'; todo: Todo };
@@ -111,7 +82,7 @@ export function completeTodoInList(
   id: string,
   completed: boolean
 ): CompleteTodoOutcome {
-  const currentTodo = findTodoById(todos, id);
+  const currentTodo = todos.find((todo) => todo.id === id);
   if (!currentTodo) {
     return createNotFoundOutcome(id);
   }
@@ -121,7 +92,7 @@ export function completeTodoInList(
 
   const updatedTodo = updateTodoInList(todos, id, {
     completed,
-    completedAt: getCompletionTimestamp(completed),
+    completedAt: completed ? new Date().toISOString() : undefined,
   });
   if (!updatedTodo) {
     return createNotFoundOutcome(id);

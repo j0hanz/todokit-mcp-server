@@ -3,14 +3,17 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import packageJson from '../package.json' with { type: 'json' };
 import { registerAllTools } from './tools/index.js';
+
+const SERVER_VERSION = packageJson.version;
 
 let shuttingDown = false;
 let activeServer: McpServer | null = null;
 
 export function createServer(): McpServer {
   const server = new McpServer(
-    { name: 'todokit', version: '1.0.0' },
+    { name: 'todokit', version: SERVER_VERSION },
     {
       instructions: 'Todokit to-do list manager',
       capabilities: { logging: {} },
@@ -46,15 +49,8 @@ export async function startServer(): Promise<void> {
   await activeServer.connect(transport);
 }
 
-function isEntrypoint(): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-  return import.meta.url === pathToFileURL(entry).href;
-}
-
-if (isEntrypoint()) {
+const entrypoint = process.argv[1];
+if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 

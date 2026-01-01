@@ -33,11 +33,11 @@ function applyClearFields(
 }
 
 function countTags(tags?: string[]): number {
-  return tags ? tags.length : 0;
+  return tags?.length ?? 0;
 }
 
 function hasTagOps(tagOps?: TagOps): boolean {
-  return countTags(tagOps?.add) > 0 || countTags(tagOps?.remove) > 0;
+  return countTags(tagOps?.add) + countTags(tagOps?.remove) > 0;
 }
 
 function shouldApplyTagUpdates(
@@ -53,14 +53,11 @@ function resolveBaseTags(
   baseTodo: Todo,
   fieldsToClear: Set<ClearField>
 ): string[] {
-  if (fieldsToClear.has('tags')) {
-    return [];
-  }
-  return baseTodo.tags;
+  return fieldsToClear.has('tags') ? [] : baseTodo.tags;
 }
 
-function safeTagList(tags?: string[]): string[] {
-  return tags ?? [];
+function normalizeTagList(tags?: string[]): string[] {
+  return normalizeTags(tags ?? []);
 }
 
 function buildMergedTags(
@@ -69,8 +66,8 @@ function buildMergedTags(
   tagOps?: TagOps
 ): string[] {
   const baseTags = resolveBaseTags(baseTodo, fieldsToClear);
-  const addTags = normalizeTags(safeTagList(tagOps?.add));
-  const removeTags = new Set(normalizeTags(safeTagList(tagOps?.remove)));
+  const addTags = normalizeTagList(tagOps?.add);
+  const removeTags = new Set(normalizeTagList(tagOps?.remove));
   return normalizeTags([...baseTags, ...addTags]).filter(
     (tag) => !removeTags.has(tag)
   );

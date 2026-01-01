@@ -9,43 +9,25 @@ export interface ErrorResponse {
   isError: true;
 }
 
-function getMessageFromErrorInstance(error: unknown): string | undefined {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return undefined;
-}
+type MessageGetter = (error: unknown) => unknown;
 
-function getMessageFromString(error: unknown): string | undefined {
-  if (typeof error === 'string' && error.length > 0) {
-    return error;
-  }
-  return undefined;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
-function isObjectWithMessage(value: unknown): value is { message?: unknown } {
-  return typeof value === 'object' && value !== null && 'message' in value;
-}
-
-function getMessageFromObject(error: unknown): string | undefined {
-  if (!isObjectWithMessage(error)) {
-    return undefined;
-  }
-  const message = error.message;
-  return isNonEmptyString(message) ? message : undefined;
-}
+const MESSAGE_GETTERS: MessageGetter[] = [
+  (error) => (error instanceof Error ? error.message : undefined),
+  (error) => (typeof error === 'string' ? error : undefined),
+  (error) =>
+    error && typeof error === 'object' && 'message' in error
+      ? (error as { message?: unknown }).message
+      : undefined,
+];
 
 export function getErrorMessage(error: unknown): string {
-  return (
-    getMessageFromErrorInstance(error) ??
-    getMessageFromString(error) ??
-    getMessageFromObject(error) ??
-    'Unknown error'
-  );
+  for (const getter of MESSAGE_GETTERS) {
+    const message = getter(error);
+    if (typeof message === 'string' && message.length > 0) {
+      return message;
+    }
+  }
+  return 'Unknown error';
 }
 
 export function createErrorResponse(

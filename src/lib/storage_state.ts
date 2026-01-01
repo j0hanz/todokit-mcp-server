@@ -20,11 +20,6 @@ const FILE_ENCODING = 'utf-8' as const;
 const TEMP_DIR_PREFIX = '.tmp-';
 
 let writeChain: Promise<void> = Promise.resolve();
-let cachedTodos: Todo[] | null = null;
-let cachedMtimeMs: number | null = null;
-let cachedPath: string | null = null;
-let inFlightRead: Promise<Todo[]> | null = null;
-let inFlightPath: string | null = null;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -79,26 +74,6 @@ function getTodoFilePath(): string {
   return resolved;
 }
 
-function clearCacheForPath(path: string): void {
-  if (cachedPath === path) {
-    cachedTodos = null;
-    cachedMtimeMs = null;
-  }
-}
-
-function getCachedTodos(path: string, mtimeMs: number): Todo[] | null {
-  if (cachedTodos && cachedPath === path && cachedMtimeMs === mtimeMs) {
-    return cachedTodos;
-  }
-  return null;
-}
-
-function updateCache(path: string, todos: Todo[], mtimeMs: number): void {
-  cachedTodos = todos;
-  cachedMtimeMs = mtimeMs;
-  cachedPath = path;
-}
-
 function parseTodos(rawJson: string): Todo[] {
   const raw: unknown = JSON.parse(rawJson);
   const parsed = TodosSchema.safeParse(raw);
@@ -135,57 +110,19 @@ async function readTodosFile(path: string): Promise<Todo[]> {
   return parseTodos(data);
 }
 
-function handleMissingFile(path: string): Todo[] {
-  clearCacheForPath(path);
-  return [];
-}
-
-async function readTodosWithStats(path: string, stats: Stats): Promise<Todo[]> {
-  const cached = getCachedTodos(path, stats.mtimeMs);
-  if (cached) {
-    return cached;
-  }
-  const parsed = await readTodosFile(path);
-  updateCache(path, parsed, stats.mtimeMs);
-  return parsed;
-}
-
-function handleReadError(path: string, error: unknown): Todo[] {
-  if (isFileNotFound(error)) {
-    return handleMissingFile(path);
-  }
-  throw error;
-}
-
-async function readTodosWithCache(path: string): Promise<Todo[]> {
+export async function readTodosFromDisk(): Promise<Todo[]> {
+  const path = getTodoFilePath();
   try {
     const stats = await statTodoFile(path);
     if (!stats) {
-      return handleMissingFile(path);
+      return [];
     }
-    return await readTodosWithStats(path, stats);
+    return await readTodosFile(path);
   } catch (error: unknown) {
-    return handleReadError(path, error);
-  }
-}
-
-export async function readTodosFromDisk(): Promise<Todo[]> {
-  const path = getTodoFilePath();
-  if (inFlightRead && inFlightPath === path) {
-    return inFlightRead;
-  }
-
-  const readPromise = readTodosWithCache(path);
-  inFlightRead = readPromise;
-  inFlightPath = path;
-
-  try {
-    return await readPromise;
-  } finally {
-    if (inFlightRead === readPromise) {
-      inFlightRead = null;
-      inFlightPath = null;
+    if (isFileNotFound(error)) {
+      return [];
     }
+    throw error;
   }
 }
 
@@ -261,7 +198,7 @@ async function writeFileAtomically(path: string, data: string): Promise<void> {
         'cleanup temp dir'
       );
     } catch {
-      // Best-effort cleanup of temp artifacts.
+      void 0;
     }
   }
 }
@@ -282,16 +219,4 @@ export async function waitForWrites(): Promise<void> {
 export async function persistTodos(todos: Todo[]): Promise<void> {
   const path = getTodoFilePath();
   await writeFileAtomically(path, JSON.stringify(todos, null, 2));
-  cachedTodos = todos;
-  cachedPath = path;
-  try {
-    const stats = await withTimeout(
-      stat(path),
-      FILE_TIMEOUT_MS,
-      'stat todo file'
-    );
-    cachedMtimeMs = stats.mtimeMs;
-  } catch {
-    cachedMtimeMs = null;
-  }
 }

@@ -22,15 +22,14 @@ export function registerAddTodos(server: McpServer): void {
     async ({ items }) => {
       try {
         const todos = await addTodos(items);
-        const structured = {
+        return createToolResponse({
           ok: true,
           result: {
             items: todos,
             summary: `Added ${String(todos.length)} todos`,
             nextActions: ['list_todos', 'update_todo'],
           },
-        };
-        return createToolResponse(structured);
+        });
       } catch (err) {
         return createErrorResponse('E_ADD_TODOS', getErrorMessage(err));
       }

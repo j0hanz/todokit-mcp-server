@@ -108,57 +108,26 @@ export async function deleteTodo(id: string): Promise<boolean> {
 
 export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
 
-type UpdatePlan =
-  | { kind: 'updates'; id: string; updates: TodoUpdate }
-  | UpdateTodoOutcome;
-
-function resolveMatchOutcome(
-  todos: Todo[],
-  input: ResolveTodoInput
-): MatchOutcome {
-  return unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-}
-
-function buildUpdatePlan(
-  outcome: MatchOutcome,
-  buildUpdates: (todo: Todo) => TodoUpdate | null
-): UpdatePlan {
-  if (outcome.kind !== 'match') {
-    return outcome;
-  }
-  const nextUpdates = buildUpdates(outcome.todo);
-  if (!nextUpdates || Object.keys(nextUpdates).length === 0) {
-    return { kind: 'no_updates' };
-  }
-  return { kind: 'updates', id: outcome.todo.id, updates: nextUpdates };
-}
-
-function applyUpdatePlan(todos: Todo[], plan: UpdatePlan): UpdateTodoOutcome {
-  if (plan.kind !== 'updates') {
-    return plan;
-  }
-  const updatedTodo = updateTodoInList(todos, plan.id, plan.updates);
-  if (!updatedTodo) {
-    return createNotFoundOutcome(plan.id);
-  }
-  return { kind: 'match', todo: updatedTodo };
-}
-
 export async function updateTodoBySelector(
   input: ResolveTodoInput,
   buildUpdates: (todo: Todo) => TodoUpdate | null
 ): Promise<UpdateTodoOutcome> {
   return queueWrite(async () => {
     const todos = await readTodosFromDisk();
-    const outcome = resolveMatchOutcome(todos, input);
-    const plan = buildUpdatePlan(outcome, buildUpdates);
-    if (plan.kind !== 'updates') return plan;
-
-    const result = applyUpdatePlan(todos, plan);
-    if (result.kind !== 'match') return result;
-
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
+    if (outcome.kind !== 'match') {
+      return outcome;
+    }
+    const updates = buildUpdates(outcome.todo);
+    if (!updates || Object.keys(updates).length === 0) {
+      return { kind: 'no_updates' };
+    }
+    const updatedTodo = updateTodoInList(todos, outcome.todo.id, updates);
+    if (!updatedTodo) {
+      return createNotFoundOutcome(outcome.todo.id);
+    }
     await persistTodos(todos);
-    return result;
+    return { kind: 'match', todo: updatedTodo };
   });
 }
 
@@ -167,18 +136,18 @@ export async function deleteTodoBySelector(
 ): Promise<MatchOutcome> {
   return queueWrite(async () => {
     const todos = await readTodosFromDisk();
-    const outcome = resolveMatchOutcome(todos, input);
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
     if (outcome.kind !== 'match') return outcome;
 
     const index = todos.findIndex((todo) => todo.id === outcome.todo.id);
     if (index === -1) {
       return createNotFoundOutcome(outcome.todo.id);
     }
-
-    const [removed] = todos.splice(index, 1);
+    const removed = todos[index];
     if (!removed) {
       return createNotFoundOutcome(outcome.todo.id);
     }
+    todos.splice(index, 1);
 
     await persistTodos(todos);
     return { kind: 'match', todo: removed };
@@ -193,7 +162,7 @@ export async function completeTodoBySelector(
 ): Promise<CompleteTodoOutcome> {
   return queueWrite(async () => {
     const todos = await readTodosFromDisk();
-    const outcome = resolveMatchOutcome(todos, input);
+    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
     if (outcome.kind !== 'match') return outcome;
 
     const result = completeTodoInList(todos, outcome.todo.id, completed);
