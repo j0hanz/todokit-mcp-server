@@ -109,13 +109,6 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
   };
 }
 
-function countMatches(
-  todos: Todo[],
-  predicate: (todo: Todo) => boolean
-): number {
-  return todos.reduce((total, todo) => total + (predicate(todo) ? 1 : 0), 0);
-}
-
 function computeCounts(
   todos: Todo[],
   todayIso: string
@@ -125,9 +118,17 @@ function computeCounts(
   pending: number;
   overdue: number;
 } {
+  let completed = 0;
+  let overdue = 0;
+  for (const todo of todos) {
+    if (todo.completed) {
+      completed += 1;
+    }
+    if (isOverdue(todo, todayIso)) {
+      overdue += 1;
+    }
+  }
   const total = todos.length;
-  const completed = countMatches(todos, (todo) => todo.completed);
-  const overdue = countMatches(todos, (todo) => isOverdue(todo, todayIso));
   return {
     total,
     completed,

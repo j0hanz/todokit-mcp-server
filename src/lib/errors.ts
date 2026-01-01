@@ -9,25 +9,31 @@ export interface ErrorResponse {
   isError: true;
 }
 
-type MessageGetter = (error: unknown) => unknown;
+function extractFromError(error: unknown): string | undefined {
+  return error instanceof Error ? error.message : undefined;
+}
 
-const MESSAGE_GETTERS: MessageGetter[] = [
-  (error) => (error instanceof Error ? error.message : undefined),
-  (error) => (typeof error === 'string' ? error : undefined),
-  (error) =>
-    error && typeof error === 'object' && 'message' in error
-      ? (error as { message?: unknown }).message
-      : undefined,
-];
+function extractFromString(error: unknown): string | undefined {
+  return typeof error === 'string' && error.length > 0 ? error : undefined;
+}
+
+function hasMessageProp(error: unknown): error is { message?: unknown } {
+  return Boolean(error && typeof error === 'object' && 'message' in error);
+}
+
+function extractFromMessageProp(error: unknown): string | undefined {
+  if (!hasMessageProp(error)) return undefined;
+  const msg = error.message;
+  return typeof msg === 'string' && msg.length > 0 ? msg : undefined;
+}
 
 export function getErrorMessage(error: unknown): string {
-  for (const getter of MESSAGE_GETTERS) {
-    const message = getter(error);
-    if (typeof message === 'string' && message.length > 0) {
-      return message;
-    }
-  }
-  return 'Unknown error';
+  return (
+    extractFromError(error) ??
+    extractFromString(error) ??
+    extractFromMessageProp(error) ??
+    'Unknown error'
+  );
 }
 
 export function createErrorResponse(

@@ -19,7 +19,15 @@ const FILE_TIMEOUT_MS = 5000;
 const FILE_ENCODING = 'utf-8' as const;
 const TEMP_DIR_PREFIX = '.tmp-';
 
+interface TodosCache {
+  path: string;
+  mtimeMs: number;
+  size: number;
+  todos: Todo[];
+}
+
 let writeChain: Promise<void> = Promise.resolve();
+let todosCache: TodosCache | null = null;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -83,6 +91,23 @@ function parseTodos(rawJson: string): Todo[] {
   return parsed.data;
 }
 
+function getCachedTodos(path: string, stats: Stats): Todo[] | null {
+  if (!todosCache) return null;
+  if (todosCache.path !== path) return null;
+  if (todosCache.mtimeMs !== stats.mtimeMs) return null;
+  if (todosCache.size !== stats.size) return null;
+  return todosCache.todos;
+}
+
+function setTodosCache(path: string, stats: Stats, todos: Todo[]): void {
+  todosCache = {
+    path,
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+    todos,
+  };
+}
+
 async function statTodoFile(path: string): Promise<Stats | null> {
   try {
     const stats = await withTimeout(
@@ -115,11 +140,17 @@ export async function readTodosFromDisk(): Promise<Todo[]> {
   try {
     const stats = await statTodoFile(path);
     if (!stats) {
+      todosCache = null;
       return [];
     }
-    return await readTodosFile(path);
+    const cached = getCachedTodos(path, stats);
+    if (cached) return cached;
+    const todos = await readTodosFile(path);
+    setTodosCache(path, stats, todos);
+    return todos;
   } catch (error: unknown) {
     if (isFileNotFound(error)) {
+      todosCache = null;
       return [];
     }
     throw error;
@@ -198,7 +229,7 @@ async function writeFileAtomically(path: string, data: string): Promise<void> {
         'cleanup temp dir'
       );
     } catch {
-      void 0;
+      // Cleanup failure is non-critical
     }
   }
 }
@@ -219,4 +250,10 @@ export async function waitForWrites(): Promise<void> {
 export async function persistTodos(todos: Todo[]): Promise<void> {
   const path = getTodoFilePath();
   await writeFileAtomically(path, JSON.stringify(todos, null, 2));
+  const stats = await statTodoFile(path);
+  if (stats) {
+    setTodosCache(path, stats, todos);
+  } else {
+    todosCache = null;
+  }
 }

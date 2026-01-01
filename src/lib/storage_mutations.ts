@@ -45,14 +45,11 @@ function buildUpdatedTodo(currentTodo: Todo, updates: TodoUpdate): Todo {
   };
 }
 
-export function updateTodoInList(
+function updateTodoAtIndex(
   todos: Todo[],
-  id: string,
+  index: number,
   updates: TodoUpdate
 ): Todo | null {
-  const index = todos.findIndex((todo) => todo.id === id);
-  if (index === -1) return null;
-
   const currentTodo = todos[index];
   if (!currentTodo) return null;
 
@@ -61,6 +58,26 @@ export function updateTodoInList(
 
   todos[index] = updatedTodo;
   return updatedTodo;
+}
+
+function resolveTodoIndex(
+  todos: Todo[],
+  id: string
+): { index: number; todo: Todo } | null {
+  const index = todos.findIndex((todo) => todo.id === id);
+  if (index === -1) return null;
+  const todo = todos[index];
+  return todo ? { index, todo } : null;
+}
+
+export function updateTodoInList(
+  todos: Todo[],
+  id: string,
+  updates: TodoUpdate
+): Todo | null {
+  const index = todos.findIndex((todo) => todo.id === id);
+  if (index === -1) return null;
+  return updateTodoAtIndex(todos, index, updates);
 }
 
 export function createNotFoundOutcome(id: string): MatchOutcome {
@@ -82,15 +99,15 @@ export function completeTodoInList(
   id: string,
   completed: boolean
 ): CompleteTodoOutcome {
-  const currentTodo = todos.find((todo) => todo.id === id);
-  if (!currentTodo) {
+  const resolved = resolveTodoIndex(todos, id);
+  if (!resolved) {
     return createNotFoundOutcome(id);
   }
-  if (currentTodo.completed === completed) {
-    return { kind: 'already', todo: currentTodo };
+  if (resolved.todo.completed === completed) {
+    return { kind: 'already', todo: resolved.todo };
   }
 
-  const updatedTodo = updateTodoInList(todos, id, {
+  const updatedTodo = updateTodoAtIndex(todos, resolved.index, {
     completed,
     completedAt: completed ? new Date().toISOString() : undefined,
   });

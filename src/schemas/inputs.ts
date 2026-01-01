@@ -1,10 +1,50 @@
-import { z } from 'zod';
+import {
+  z,
+  type ZodNever,
+  type ZodObject,
+  type ZodOptional,
+  type ZodString,
+} from 'zod';
 
 import { IsoDateSchema } from './iso_date.js';
 
 const TagSchema = z.string().min(1).max(50);
 const SortBySchema = z.enum(['dueDate', 'priority', 'createdAt', 'title']);
 const SortOrderSchema = z.enum(['asc', 'desc']);
+
+type SelectorByIdSchema = ZodObject<
+  { id: ZodString; query: ZodOptional<ZodNever> },
+  'strict'
+>;
+type SelectorByQuerySchema = ZodObject<
+  { query: ZodString; id: ZodOptional<ZodNever> },
+  'strict'
+>;
+
+interface SelectorSchemas {
+  byId: SelectorByIdSchema;
+  byQuery: SelectorByQuerySchema;
+}
+
+function buildSelectorSchemas(
+  idDescription: string,
+  queryDescription: string
+): SelectorSchemas {
+  return {
+    byId: z
+      .object({
+        id: z.string().min(1).max(100).describe(idDescription),
+        query: z.never().optional(),
+      })
+      .strict(),
+    byQuery: z
+      .object({
+        query: z.string().min(1).max(200).describe(queryDescription),
+        id: z.never().optional(),
+      })
+      .strict(),
+  };
+}
 const TodoInputSchema = z
   .object({
     title: z.string().min(1).max(200).describe('The title of the todo'),
@@ -40,53 +80,45 @@ export const AddTodosSchema = z
   })
   .strict();
 
-export const DeleteTodoSchema = z
-  .object({
-    id: z
-      .string()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('The ID of the todo to delete'),
-    query: z
-      .string()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Search text to find a single todo to delete'),
+const deleteTodoSelector = buildSelectorSchemas(
+  'The ID of the todo to delete',
+  'Search text to find a single todo to delete'
+);
+
+export const DeleteTodoSchema = z.union([
+  deleteTodoSelector.byId.extend({
     dryRun: z
       .boolean()
       .optional()
       .describe('Simulate the deletion without changing data'),
-  })
-  .strict()
-  .refine((value) => Boolean(value.id ?? value.query), {
-    message: 'Provide id or query to identify the todo',
-  });
+  }),
+  deleteTodoSelector.byQuery.extend({
+    dryRun: z
+      .boolean()
+      .optional()
+      .describe('Simulate the deletion without changing data'),
+  }),
+]);
 
-export const CompleteTodoSchema = z
-  .object({
-    id: z
-      .string()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('The ID of the todo to complete'),
-    query: z
-      .string()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Search text to find a single todo to complete'),
+const completeTodoSelector = buildSelectorSchemas(
+  'The ID of the todo to complete',
+  'Search text to find a single todo to complete'
+);
+
+export const CompleteTodoSchema = z.union([
+  completeTodoSelector.byId.extend({
     completed: z
       .boolean()
       .optional()
       .describe('Set completion status (default: true)'),
-  })
-  .strict()
-  .refine((value) => Boolean(value.id ?? value.query), {
-    message: 'Provide id or query to identify the todo',
-  });
+  }),
+  completeTodoSelector.byQuery.extend({
+    completed: z
+      .boolean()
+      .optional()
+      .describe('Set completion status (default: true)'),
+  }),
+]);
 
 const TagOpsSchema = z
   .object({
@@ -95,40 +127,33 @@ const TagOpsSchema = z
   })
   .strict();
 
-export const UpdateTodoSchema = z
-  .object({
-    id: z
-      .string()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('The ID of the todo to update'),
-    query: z
-      .string()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Search text to find a single todo to update'),
-    title: z.string().min(1).max(200).optional().describe('New title'),
-    description: z.string().max(2000).optional().describe('New description'),
-    completed: z.boolean().optional().describe('Completion status'),
-    priority: z
-      .enum(['low', 'normal', 'high'])
-      .optional()
-      .describe('New priority level'),
-    dueDate: IsoDateSchema.optional().describe('New due date (ISO format)'),
-    tags: z.array(TagSchema).max(50).optional().describe('New tags'),
-    clearFields: z
-      .array(z.enum(['description', 'dueDate', 'tags']))
-      .max(3)
-      .optional()
-      .describe('Fields to clear'),
-    tagOps: TagOpsSchema.optional().describe('Tag modifications to apply'),
-  })
-  .strict()
-  .refine((value) => Boolean(value.id ?? value.query), {
-    message: 'Provide id or query to identify the todo',
-  });
+const updateTodoSelector = buildSelectorSchemas(
+  'The ID of the todo to update',
+  'Search text to find a single todo to update'
+);
+
+const UpdateTodoFieldsSchema = {
+  title: z.string().min(1).max(200).optional().describe('New title'),
+  description: z.string().max(2000).optional().describe('New description'),
+  completed: z.boolean().optional().describe('Completion status'),
+  priority: z
+    .enum(['low', 'normal', 'high'])
+    .optional()
+    .describe('New priority level'),
+  dueDate: IsoDateSchema.optional().describe('New due date (ISO format)'),
+  tags: z.array(TagSchema).max(50).optional().describe('New tags'),
+  clearFields: z
+    .array(z.enum(['description', 'dueDate', 'tags']))
+    .max(3)
+    .optional()
+    .describe('Fields to clear'),
+  tagOps: TagOpsSchema.optional().describe('Tag modifications to apply'),
+};
+
+export const UpdateTodoSchema = z.union([
+  updateTodoSelector.byId.extend(UpdateTodoFieldsSchema),
+  updateTodoSelector.byQuery.extend(UpdateTodoFieldsSchema),
+]);
 
 export const ListTodosFilterSchema = z
   .object({
