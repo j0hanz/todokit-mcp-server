@@ -10,13 +10,30 @@ const DEFAULT_TODO_FILE = join(__dirname, '../../todos.json');
 
 let writeQueue: Promise<void> = Promise.resolve();
 
-function isNotFoundError(error: unknown): boolean {
+function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
   return (
     typeof error === 'object' &&
     error !== null &&
     'code' in error &&
     (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
+}
+
+const TRANSIENT_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if (!('code' in error)) return undefined;
+  return (error as NodeJS.ErrnoException).code;
+}
+
+function isTransientError(error: unknown): boolean {
+  const code = getErrorCode(error);
+  return code !== undefined && TRANSIENT_ERROR_CODES.has(code);
+}
+
+function noop(): void {
+  // Intentionally empty
 }
 
 export function getTodoFilePath(): string {
@@ -58,15 +75,41 @@ async function loadTodos(path: string): Promise<Todo[]> {
   return result.data;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function tryRename(from: string, to: string): Promise<Error | null> {
+  try {
+    await rename(from, to);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+function shouldRetry(error: Error, attempt: number): boolean {
+  return isTransientError(error) && attempt < 2;
+}
+
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const error = await tryRename(from, to);
+    if (!error) return;
+    if (!shouldRetry(error, attempt)) throw error;
+    await delay(50 * (attempt + 1));
+  }
+}
+
 async function writeFileAtomic(path: string, contents: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, contents, 'utf8');
+
   try {
-    await rename(tempPath, path);
-  } catch {
-    await rm(path, { force: true });
-    await rename(tempPath, path);
+    await writeFile(tempPath, contents, { encoding: 'utf8', flush: true });
+    await renameWithRetry(tempPath, path);
+  } finally {
+    await rm(tempPath, { force: true }).catch(noop);
   }
 }
 
