@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z, type ZodType } from 'zod';
 
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -16,10 +16,12 @@ function isValidIsoDate(value: string): boolean {
   );
 }
 
-export const IsoDateSchema = z
+export const IsoDateSchema: ZodType<string> = z
   .string()
   .refine((value) => isValidIsoDate(value), {
-    message: 'Invalid date (YYYY-MM-DD)',
+    error: 'Invalid date (YYYY-MM-DD)',
   });
 
-export const IsoDateTimeSchema = z.string().datetime({ offset: true });
+export const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
+  offset: true,
+});

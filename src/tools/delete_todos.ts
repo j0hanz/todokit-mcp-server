@@ -33,7 +33,7 @@ function hasAtLeastOneFilter(v: Record<string, unknown>): boolean {
 }
 
 const DeleteTodosSchema = z
-  .object({
+  .strictObject({
     status: z
       .enum(['pending', 'completed', 'all'])
       .optional()
@@ -62,9 +62,8 @@ const DeleteTodosSchema = z
       .optional()
       .describe('Max items to delete (default: 10, safety limit)'),
   })
-  .strict()
   .refine(hasAtLeastOneFilter, {
-    message: 'At least one filter is required for bulk delete',
+    error: 'At least one filter is required for bulk delete',
   });
 
 type DeleteTodosInput = z.infer<typeof DeleteTodosSchema>;

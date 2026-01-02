@@ -1,8 +1,21 @@
-import { z } from 'zod';
+import { z, type ZodType } from 'zod';
 
 import { IsoDateSchema, IsoDateTimeSchema } from '../schemas/iso_date.js';
 
-const TodoSchema = z.object({
+export interface Todo {
+  id: string;
+  title: string;
+  description?: string | undefined;
+  completed: boolean;
+  priority: 'low' | 'normal' | 'high';
+  dueDate?: string | undefined;
+  tags: string[];
+  createdAt: string;
+  updatedAt?: string | undefined;
+  completedAt?: string | undefined;
+}
+
+const TodoSchema: ZodType<Todo> = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string().optional(),
@@ -15,6 +28,4 @@ const TodoSchema = z.object({
   completedAt: IsoDateTimeSchema.optional(),
 });
 
-export const TodosSchema = z.array(TodoSchema);
-
-export type Todo = z.infer<typeof TodoSchema>;
+export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
