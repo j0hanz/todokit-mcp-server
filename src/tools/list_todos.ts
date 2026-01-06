@@ -88,7 +88,7 @@ function sortTodos(
   const direction = order === 'desc' ? -1 : 1;
   const comparator = COMPARATORS[sortBy];
 
-  return [...todos].sort((a, b) => {
+  return todos.toSorted((a, b) => {
     const diff = comparator(a, b);
     if (diff !== 0) return diff * direction;
     return a.createdAt.localeCompare(b.createdAt);

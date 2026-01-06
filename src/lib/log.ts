@@ -7,17 +7,15 @@ export interface Logger {
   error(message: string): void;
 }
 
+const LEVEL_RANKS = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+} as const;
+
 function levelRank(level: LogLevel): number {
-  switch (level) {
-    case 'debug':
-      return 10;
-    case 'info':
-      return 20;
-    case 'warn':
-      return 30;
-    case 'error':
-      return 40;
-  }
+  return LEVEL_RANKS[level];
 }
 
 function shouldLog(current: LogLevel, target: LogLevel): boolean {

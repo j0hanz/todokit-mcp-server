@@ -148,9 +148,7 @@ function applyUpdateToTodos(
     return { todos, result: current };
   }
   const updatedTodo = calculateUpdatedTodo(current, normalizedUpdates);
-  const nextTodos = [...todos];
-  nextTodos[index] = updatedTodo;
-  return { todos: nextTodos, result: updatedTodo };
+  return { todos: todos.with(index, updatedTodo), result: updatedTodo };
 }
 
 export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
@@ -238,18 +236,10 @@ export async function completeTodoBySelector(
 export function deleteTodosByIds(ids: string[]): Promise<string[]> {
   const idsToDelete = new Set(ids);
   return withTodos((todos) => {
-    const initial: { deletedIds: string[]; remaining: Todo[] } = {
-      deletedIds: [],
-      remaining: [],
-    };
-    const result = todos.reduce((acc, todo) => {
-      if (idsToDelete.has(todo.id)) {
-        acc.deletedIds.push(todo.id);
-      } else {
-        acc.remaining.push(todo);
-      }
-      return acc;
-    }, initial);
-    return { todos: result.remaining, result: result.deletedIds };
+    const remaining = todos.filter((todo) => !idsToDelete.has(todo.id));
+    const deletedIds = todos
+      .filter((todo) => idsToDelete.has(todo.id))
+      .map((todo) => todo.id);
+    return { todos: remaining, result: deletedIds };
   });
 }
