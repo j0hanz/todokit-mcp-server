@@ -22,6 +22,7 @@ An MCP server for Todokit, a task management and productivity tool with JSON sto
 - Tagging: tags are normalized (trimmed, lowercase, unique) and can be added or removed.
 - Safe deletion: dry-run previews before deleting; bulk delete defaults to a safety limit.
 - JSON persistence with queued writes and atomic file writes.
+- Optional diagnostics events (tool calls/results, storage, lifecycle) via Node diagnostics channels.
 - List summaries with counts (pending, completed, overdue) and pagination metadata.
 
 ## Quick Start
@@ -89,6 +90,32 @@ By default, todos are written as pretty-printed JSON (2-space indentation). To w
 TODOKIT_JSON_PRETTY=0 npx -y @j0hanz/todokit-mcp@latest
 ```
 
+### CLI options
+
+The server accepts a few CLI flags (use `--` to forward args when running via `npx`).
+
+```bash
+npx -y @j0hanz/todokit-mcp@latest -- --todo-file ./todos.json --diagnostics --log-level debug
+```
+
+| Flag            | Alias | Description                                                                |
+| :-------------- | :---- | :------------------------------------------------------------------------- |
+| `--todo-file`   | `-f`  | Override the todo storage path (same as `TODOKIT_TODO_FILE`).              |
+| `--diagnostics` | `-d`  | Enable diagnostics output (JSON lines) to stderr.                          |
+| `--log-level`   | `-l`  | Diagnostics log level: `error`, `warn`, `info`, `debug` (default: `info`). |
+
+The log level is only used when diagnostics output is enabled.
+
+### Diagnostics
+
+Diagnostics events are always published on Node's `diagnostics_channel` and can be subscribed to programmatically. When `--diagnostics` is set, the server attaches default subscribers and prints JSON events to **stderr** (stdout stays reserved for MCP traffic).
+
+Channels:
+
+- `todokit:tool` — tool call + tool result events
+- `todokit:storage` — read/write/close events
+- `todokit:lifecycle` — shutdown events
+
 ## Tools
 
 All tools return a JSON payload in both `content` (stringified) and `structuredContent`.
@@ -112,7 +139,7 @@ Error payload:
 }
 ```
 
-The `result` shape is tool-specific. If a `query` matches multiple todos, tools return `E_AMBIGUOUS` with preview matches and a hint to use an exact `id`.
+The `result` shape is tool-specific. If a `query` matches multiple todos, most tools return `E_AMBIGUOUS` with preview matches and a hint to use an exact `id`. `delete_todo` with `dryRun: true` instead returns an ok response with `matches` and `totalMatches` for preview.
 
 ### add_todo
 
