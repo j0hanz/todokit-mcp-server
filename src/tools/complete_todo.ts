@@ -13,6 +13,7 @@ import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { CompleteTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 type CompleteTodoInput = z.infer<typeof CompleteTodoSchema>;
 
@@ -73,7 +74,8 @@ async function handleCompleteTodo(
 }
 
 export function registerCompleteTodo(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'complete_todo',
     {
       title: 'Complete Todo',

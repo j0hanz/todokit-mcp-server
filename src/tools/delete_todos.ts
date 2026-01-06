@@ -9,6 +9,7 @@ import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { IsoDateSchema } from '../schemas/iso_date.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 const TagSchema = z.string().min(1).max(50);
 
@@ -154,7 +155,8 @@ async function handleDeleteTodos(
 }
 
 export function registerDeleteTodos(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'delete_todos',
     {
       title: 'Delete Todos (Bulk)',

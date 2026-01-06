@@ -14,6 +14,7 @@ import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { DeleteTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
 
@@ -85,7 +86,8 @@ async function handleDeleteTodo(
 }
 
 export function registerDeleteTodo(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'delete_todo',
     {
       title: 'Delete Todo',

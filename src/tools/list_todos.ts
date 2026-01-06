@@ -9,6 +9,7 @@ import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { ListTodosFilterSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
 type SortBy = 'dueDate' | 'priority' | 'createdAt' | 'title';
@@ -32,6 +33,12 @@ interface CountSummary {
   completed: number;
   pending: number;
   overdue: number;
+  isCreatedAtAsc: boolean;
+  isCreatedAtDesc: boolean;
+}
+
+interface OrderState {
+  previousCreatedAt: string | null;
   isCreatedAtAsc: boolean;
   isCreatedAtDesc: boolean;
 }
@@ -109,48 +116,47 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
 }
 
 function computeCounts(todos: Todo[], todayIso: string): CountSummary {
-  let completed = 0;
-  let overdue = 0;
-  let previousCreatedAt: string | null = null;
-  const orderState = { isCreatedAtAsc: true, isCreatedAtDesc: true };
-  for (const todo of todos) {
-    if (todo.completed) {
-      completed += 1;
-    }
-    if (isOverdue(todo, todayIso)) {
-      overdue += 1;
-    }
-    previousCreatedAt = updateCreatedAtOrder(
-      previousCreatedAt,
-      todo.createdAt,
-      orderState
-    );
-  }
+  const orderState = createOrderState();
+  const totals = todos.reduce(
+    (current, todo) => {
+      current.completed += Number(todo.completed);
+      current.overdue += Number(isOverdue(todo, todayIso));
+      updateOrderState(orderState, todo.createdAt);
+      return current;
+    },
+    { completed: 0, overdue: 0 }
+  );
   const total = todos.length;
   return {
     total,
-    completed,
-    pending: total - completed,
-    overdue,
-    ...orderState,
+    completed: totals.completed,
+    pending: total - totals.completed,
+    overdue: totals.overdue,
+    isCreatedAtAsc: orderState.isCreatedAtAsc,
+    isCreatedAtDesc: orderState.isCreatedAtDesc,
   };
 }
 
-function updateCreatedAtOrder(
-  previous: string | null,
-  current: string,
-  orderState: { isCreatedAtAsc: boolean; isCreatedAtDesc: boolean }
-): string {
+function createOrderState(): OrderState {
+  return {
+    previousCreatedAt: null,
+    isCreatedAtAsc: true,
+    isCreatedAtDesc: true,
+  };
+}
+
+function updateOrderState(state: OrderState, current: string): void {
+  const previous = state.previousCreatedAt;
   if (previous === null) {
-    return current;
+    state.previousCreatedAt = current;
+    return;
   }
   if (current < previous) {
-    orderState.isCreatedAtAsc = false;
+    state.isCreatedAtAsc = false;
+  } else if (current > previous) {
+    state.isCreatedAtDesc = false;
   }
-  if (current > previous) {
-    orderState.isCreatedAtDesc = false;
-  }
-  return current;
+  state.previousCreatedAt = current;
 }
 
 function buildSummary(counts: CountSummary, pageCount: number): string {
@@ -226,7 +232,8 @@ async function handleListTodos(
 }
 
 export function registerListTodos(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'list_todos',
     {
       title: 'List Todos',

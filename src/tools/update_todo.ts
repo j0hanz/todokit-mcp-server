@@ -11,6 +11,7 @@ import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
 import { UpdateTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 type UpdateFields = TodoUpdate;
@@ -134,7 +135,8 @@ async function handleUpdateTodo(
 }
 
 export function registerUpdateTodo(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'update_todo',
     {
       title: 'Update Todo',

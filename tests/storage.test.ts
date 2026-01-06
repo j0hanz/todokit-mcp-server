@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   addTodo,
-  deleteTodo,
+  deleteTodoBySelector,
   getTodos,
   normalizeTags,
-  updateTodo,
+  updateTodoBySelector,
 } from '../src/lib/storage.js';
 import './setup.js';
 
@@ -64,25 +62,43 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('updates todo completion and tags', async () => {
     const todo = await addTodo('Delta');
 
-    const completed = await updateTodo(todo.id, { completed: true });
-    assert.equal(completed?.completed, true);
-    assert.ok(completed?.completedAt);
+    const completed = await updateTodoBySelector({ id: todo.id }, () => ({
+      completed: true,
+    }));
+    assert.equal(completed.kind, 'match');
+    if (completed.kind !== 'match') {
+      throw new Error('Expected todo match');
+    }
+    assert.equal(completed.todo.completed, true);
+    assert.ok(completed.todo.completedAt);
 
-    const reopened = await updateTodo(todo.id, { completed: false });
-    assert.equal(reopened?.completed, false);
-    assert.equal(reopened?.completedAt, undefined);
+    const reopened = await updateTodoBySelector({ id: todo.id }, () => ({
+      completed: false,
+    }));
+    assert.equal(reopened.kind, 'match');
+    if (reopened.kind !== 'match') {
+      throw new Error('Expected todo match');
+    }
+    assert.equal(reopened.todo.completed, false);
+    assert.equal(reopened.todo.completedAt, undefined);
 
-    const tagged = await updateTodo(todo.id, { tags: [' New ', 'NEW'] });
-    assert.deepEqual(tagged?.tags, ['new']);
+    const tagged = await updateTodoBySelector({ id: todo.id }, () => ({
+      tags: [' New ', 'NEW'],
+    }));
+    assert.equal(tagged.kind, 'match');
+    if (tagged.kind !== 'match') {
+      throw new Error('Expected todo match');
+    }
+    assert.deepEqual(tagged.todo.tags, ['new']);
   });
 
   it('deletes todos', async () => {
     const todo = await addTodo('Epsilon');
-    const deleted = await deleteTodo(todo.id);
-    assert.equal(deleted, true);
+    const deleted = await deleteTodoBySelector({ id: todo.id });
+    assert.equal(deleted.kind, 'match');
 
-    const missing = await deleteTodo('missing');
-    assert.equal(missing, false);
+    const missing = await deleteTodoBySelector({ id: 'missing' });
+    assert.equal(missing.kind, 'error');
 
     const remaining = await getTodos();
     assert.equal(remaining.length, 0);

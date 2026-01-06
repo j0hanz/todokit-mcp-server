@@ -36,17 +36,20 @@ function normalizeUpdates(updates: TodoUpdate): TodoUpdate {
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i += 1) {
-    if (left[i] !== right[i]) return false;
-  }
-  return true;
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === 'string')
   );
+}
+
+function hasOwnKey<T extends object>(obj: T, key: PropertyKey): key is keyof T {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 function valuesEqual(current: unknown, update: unknown): boolean {
@@ -57,13 +60,10 @@ function valuesEqual(current: unknown, update: unknown): boolean {
 }
 
 function hasChanges(current: Todo, updates: TodoUpdate): boolean {
-  for (const [key, value] of Object.entries(updates)) {
-    const currentValue = current[key as keyof Todo];
-    if (!valuesEqual(currentValue, value)) {
-      return true;
-    }
-  }
-  return false;
+  return Object.entries(updates).some(([key, value]) => {
+    if (!hasOwnKey(current, key)) return true;
+    return !valuesEqual(current[key], value);
+  });
 }
 
 export async function getTodos(filters?: TodoFilters): Promise<Todo[]> {
@@ -151,20 +151,6 @@ function applyUpdateToTodos(
   return { todos: nextTodos, result: updatedTodo };
 }
 
-export function updateTodo(
-  id: string,
-  updates: TodoUpdate
-): Promise<Todo | null> {
-  return withTodos((todos) => applyUpdateToTodos(todos, id, updates));
-}
-
-export function deleteTodo(id: string): Promise<boolean> {
-  return withTodos((todos) => {
-    const remaining = todos.filter((todo) => todo.id !== id);
-    return { todos: remaining, result: remaining.length !== todos.length };
-  });
-}
-
 export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
 
 export async function updateTodoBySelector(
@@ -250,15 +236,18 @@ export async function completeTodoBySelector(
 export function deleteTodosByIds(ids: string[]): Promise<string[]> {
   const idsToDelete = new Set(ids);
   return withTodos((todos) => {
-    const deletedIds: string[] = [];
-    const remaining: Todo[] = [];
-    for (const todo of todos) {
+    const initial: { deletedIds: string[]; remaining: Todo[] } = {
+      deletedIds: [],
+      remaining: [],
+    };
+    const result = todos.reduce((acc, todo) => {
       if (idsToDelete.has(todo.id)) {
-        deletedIds.push(todo.id);
+        acc.deletedIds.push(todo.id);
       } else {
-        remaining.push(todo);
+        acc.remaining.push(todo);
       }
-    }
-    return { todos: remaining, result: deletedIds };
+      return acc;
+    }, initial);
+    return { todos: result.remaining, result: result.deletedIds };
   });
 }

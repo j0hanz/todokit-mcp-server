@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import packageJson from '../package.json' with { type: 'json' };
 import { parseCliArgs } from './lib/cli.js';
 import { closeDb } from './lib/db.js';
 import {
@@ -14,9 +14,17 @@ import {
 import { createStderrLogger } from './lib/log.js';
 import { registerAllTools } from './tools/index.js';
 
-const require = createRequire(import.meta.url);
-const packageJson = require('../package.json') as { version?: string };
-const SERVER_VERSION = packageJson.version ?? '0.0.0';
+const SERVER_VERSION = getPackageVersion(packageJson);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getPackageVersion(value: unknown): string {
+  if (!isRecord(value)) return '0.0.0';
+  const version = value.version;
+  return typeof version === 'string' && version.length > 0 ? version : '0.0.0';
+}
 
 let shuttingDown = false;
 let activeServer: McpServer | null = null;

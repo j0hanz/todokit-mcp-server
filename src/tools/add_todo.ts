@@ -5,9 +5,11 @@ import { addTodo } from '../lib/storage.js';
 import { createToolResponse } from '../lib/tool_response.js';
 import { AddTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { registerToolWithDiagnostics } from './register_tool.js';
 
 export function registerAddTodo(server: McpServer): void {
-  server.registerTool(
+  registerToolWithDiagnostics(
+    server,
     'add_todo',
     {
       title: 'Add Todo',

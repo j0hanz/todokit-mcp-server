@@ -43,10 +43,9 @@ export interface LifecycleEvent {
   signal?: string | undefined;
 }
 
-export const toolDiagnosticsChannel: Channel = channel('todokit:tool');
-export const storageDiagnosticsChannel: Channel = channel('todokit:storage');
-export const lifecycleDiagnosticsChannel: Channel =
-  channel('todokit:lifecycle');
+const toolDiagnosticsChannel: Channel = channel('todokit:tool');
+const storageDiagnosticsChannel: Channel = channel('todokit:storage');
+const lifecycleDiagnosticsChannel: Channel = channel('todokit:lifecycle');
 
 function safePublish(target: Channel, message: unknown): void {
   try {

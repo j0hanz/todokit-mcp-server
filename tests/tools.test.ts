@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodo, getTodos, updateTodo } from '../src/lib/storage.js';
+import { addTodo, getTodos, updateTodoBySelector } from '../src/lib/storage.js';
 import { registerAddTodo } from '../src/tools/add_todo.js';
 import { registerAddTodos } from '../src/tools/add_todos.js';
 import { registerCompleteTodo } from '../src/tools/complete_todo.js';
@@ -64,9 +64,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       'delete_todo',
       'delete_todos',
     ];
-    for (const name of names) {
+    names.forEach((name) => {
       assert.doesNotThrow(() => getHandler(name));
-    }
+    });
   });
 
   it('adds single and batch todos', async () => {
@@ -147,7 +147,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
     const pending = await addTodo('Pending');
     const completed = await addTodo('Completed');
-    await updateTodo(completed.id, { completed: true });
+    await updateTodoBySelector({ id: completed.id }, () => ({
+      completed: true,
+    }));
 
     const listHandler = getHandler<{ status: string }>('list_todos');
 

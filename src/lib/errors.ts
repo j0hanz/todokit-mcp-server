@@ -9,15 +9,18 @@ export interface ErrorResponse {
   isError: true;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function normalizeMessage(message: unknown): string | undefined {
   if (typeof message !== 'string' || message.length === 0) return undefined;
   return message;
 }
 
 function extractMessageObject(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object' || !('message' in error))
-    return undefined;
-  return normalizeMessage((error as { message: unknown }).message);
+  if (!isRecord(error)) return undefined;
+  return normalizeMessage(error.message);
 }
 
 export function getErrorMessage(error: unknown): string {
@@ -41,8 +44,8 @@ export function createErrorResponse(
     ...(result === undefined ? {} : { result }),
   };
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
+    content: [{ type: 'text', text: JSON.stringify(structured) }],
     structuredContent: structured,
-    isError: true as const,
+    isError: true,
   };
 }

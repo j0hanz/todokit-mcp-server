@@ -20,21 +20,20 @@ interface TodoCache {
 let cache: TodoCache | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
-function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ENOENT'
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 const TRANSIENT_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 
 function getErrorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  if (!('code' in error)) return undefined;
-  return (error as NodeJS.ErrnoException).code;
+  if (!isRecord(error)) return undefined;
+  const code = error.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return getErrorCode(error) === 'ENOENT';
 }
 
 function isTransientError(error: unknown): boolean {
@@ -118,7 +117,7 @@ async function readFileIfExists(path: string): Promise<string | null> {
 async function loadTodos(path: string): Promise<Todo[]> {
   const raw = await readFileIfExists(path);
   if (!raw) return [];
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed: unknown = JSON.parse(raw);
   const result = TodosSchema.safeParse(parsed);
   if (!result.success) {
     throw new Error('Invalid todo storage format');
