@@ -13,7 +13,7 @@ export interface TodoMatchPreview {
 const PREVIEW_LIMIT = 5;
 
 function buildMatchPreviews(
-  todos: Todo[],
+  todos: readonly Todo[],
   limit: number = PREVIEW_LIMIT
 ): TodoMatchPreview[] {
   return todos.slice(0, limit).map((todo) => ({
@@ -49,8 +49,8 @@ export type ResolveTodoResult =
   | {
       kind: 'ambiguous';
       response: ErrorResponse;
-      matches: Todo[];
-      previews: TodoMatchPreview[];
+      matches: readonly Todo[];
+      previews: readonly TodoMatchPreview[];
       query: string;
     };
 
@@ -59,8 +59,8 @@ export type MatchOutcome =
   | {
       kind: 'ambiguous';
       response: ErrorResponse;
-      matches: Todo[];
-      previews: TodoMatchPreview[];
+      matches: readonly Todo[];
+      previews: readonly TodoMatchPreview[];
       query: string;
     }
   | { kind: 'error'; response: ErrorResponse };
@@ -88,8 +88,8 @@ function createNotFoundError(target: string): ErrorResponse {
 
 function createAmbiguousError(
   query: string,
-  matches: Todo[]
-): { response: ErrorResponse; previews: TodoMatchPreview[] } {
+  matches: readonly Todo[]
+): { response: ErrorResponse; previews: readonly TodoMatchPreview[] } {
   const previews = buildMatchPreviews(matches);
   const response = createErrorResponse(
     'E_AMBIGUOUS',
@@ -103,7 +103,10 @@ function createAmbiguousError(
   return { response, previews };
 }
 
-function resolveByIdFromTodos(todos: Todo[], id: string): ResolveTodoResult {
+function resolveByIdFromTodos(
+  todos: readonly Todo[],
+  id: string
+): ResolveTodoResult {
   const match = todos.find((todo) => todo.id === id);
   if (!match) {
     return { kind: 'not_found', response: createNotFoundError(id) };
@@ -112,7 +115,7 @@ function resolveByIdFromTodos(todos: Todo[], id: string): ResolveTodoResult {
 }
 
 function resolveByQueryFromTodos(
-  todos: Todo[],
+  todos: readonly Todo[],
   query: string
 ): ResolveTodoResult {
   const trimmedQuery = query.trim();
@@ -125,7 +128,7 @@ function resolveByQueryFromTodos(
 
 function resolveQueryMatches(
   query: string,
-  matches: Todo[]
+  matches: readonly Todo[]
 ): ResolveTodoResult {
   const [firstMatch] = matches;
   if (matches.length === 1 && firstMatch) {
@@ -145,7 +148,7 @@ function resolveQueryMatches(
 }
 
 export function resolveTodoTargetFromTodos(
-  todos: Todo[],
+  todos: readonly Todo[],
   input: ResolveTodoInput
 ): ResolveTodoResult {
   if (input.id !== undefined) {

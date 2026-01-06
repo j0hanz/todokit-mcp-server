@@ -12,6 +12,13 @@ const DEFAULT_TODO_FILE = join(__dirname, '../../todos.json');
 const IO_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 30_000;
 
+function getJsonIndentation(): number {
+  const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
+  if (!raw) return 2;
+  if (raw === '0' || raw === 'false') return 0;
+  return 2;
+}
+
 interface TodoCache {
   todos: Todo[];
   mtimeMs: number | null;
@@ -175,7 +182,7 @@ async function writeFileAtomic(
 
 async function saveTodos(path: string, todos: Todo[]): Promise<void> {
   const start = nowMs();
-  const payload = `${JSON.stringify(todos, null, 2)}\n`;
+  const payload = `${JSON.stringify(todos, null, getJsonIndentation())}\n`;
   const renameRetries = await writeFileAtomic(path, payload);
   cache = { todos, mtimeMs: await getFileMtime(path) };
 
@@ -190,7 +197,7 @@ async function saveTodos(path: string, todos: Todo[]): Promise<void> {
   });
 }
 
-export async function readTodos(): Promise<Todo[]> {
+export async function readTodos(): Promise<readonly Todo[]> {
   const start = nowMs();
   await writeQueue;
   const path = getTodoFilePath();

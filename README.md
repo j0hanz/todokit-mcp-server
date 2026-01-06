@@ -81,6 +81,14 @@ $env:TODOKIT_TODO_FILE = 'C:\path\to\todos.json'
 npx -y @j0hanz/todokit-mcp@latest
 ```
 
+### JSON formatting
+
+By default, todos are written as pretty-printed JSON (2-space indentation). To write compact JSON instead, set `TODOKIT_JSON_PRETTY` to `0` or `false`.
+
+```bash
+TODOKIT_JSON_PRETTY=0 npx -y @j0hanz/todokit-mcp@latest
+```
+
 ## Tools
 
 All tools return a JSON payload in both `content` (stringified) and `structuredContent`.

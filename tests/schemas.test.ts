@@ -45,6 +45,21 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(result.success, false);
   });
 
+  it('rejects unknown fields in persisted todos', () => {
+    const result = TodosSchema.safeParse([
+      {
+        id: '1',
+        title: 'Extra field',
+        completed: false,
+        priority: 'normal',
+        tags: [],
+        createdAt: '2025-02-28T10:30:00Z',
+        extra: 'nope',
+      },
+    ]);
+    assert.equal(result.success, false);
+  });
+
   it('validates ISO date-only strings', () => {
     assert.equal(IsoDateSchema.safeParse('2025-02-28').success, true);
     assert.equal(IsoDateSchema.safeParse('2025-02-30').success, false);

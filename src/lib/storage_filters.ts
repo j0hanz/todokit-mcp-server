@@ -57,13 +57,16 @@ function matchesDate(todo: Todo, filters: TodoFilters): boolean {
 
 function matchesQuery(todo: Todo, query?: string): boolean {
   if (!query) return true;
-  const haystack = `${todo.title} ${todo.description ?? ''} ${todo.tags.join(
-    ' '
-  )}`.toLowerCase();
-  return haystack.includes(query);
+
+  if (todo.title.toLowerCase().includes(query)) return true;
+  if (todo.description?.toLowerCase().includes(query)) return true;
+  return todo.tags.some((tag) => tag.toLowerCase().includes(query));
 }
 
-export function filterTodos(todos: Todo[], filters: TodoFilters): Todo[] {
+export function filterTodos(
+  todos: readonly Todo[],
+  filters: TodoFilters
+): readonly Todo[] {
   const query = filters.query?.trim().toLowerCase();
   const tag = filters.tag ? normalizeTag(filters.tag) : undefined;
 

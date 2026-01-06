@@ -15,7 +15,7 @@ export interface Todo {
   completedAt?: string | undefined;
 }
 
-const TodoSchema: ZodType<Todo> = z.object({
+const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   title: z.string(),
   description: z.string().optional(),

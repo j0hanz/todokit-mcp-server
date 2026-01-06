@@ -19,7 +19,7 @@ import { registerToolWithDiagnostics } from './register_tool.js';
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
 
 function buildDryRunMultiple(
-  previews: unknown[],
+  previews: readonly unknown[],
   total: number
 ): CallToolResult {
   return createToolResponse({

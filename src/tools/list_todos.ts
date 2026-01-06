@@ -80,7 +80,11 @@ const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
   createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
 };
 
-function sortTodos(todos: Todo[], sortBy: SortBy, order: SortOrder): Todo[] {
+function sortTodos(
+  todos: readonly Todo[],
+  sortBy: SortBy,
+  order: SortOrder
+): Todo[] {
   const direction = order === 'desc' ? -1 : 1;
   const comparator = COMPARATORS[sortBy];
 
@@ -115,7 +119,7 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
   };
 }
 
-function computeCounts(todos: Todo[], todayIso: string): CountSummary {
+function computeCounts(todos: readonly Todo[], todayIso: string): CountSummary {
   const orderState = createOrderState();
   const totals = todos.reduce(
     (current, todo) => {
@@ -170,7 +174,11 @@ function buildSummary(counts: CountSummary, pageCount: number): string {
   )} pending, ${String(counts.completed)} completed${overdueSuffix}).`;
 }
 
-function paginateTodos(todos: Todo[], offset: number, limit: number): Todo[] {
+function paginateTodos(
+  todos: readonly Todo[],
+  offset: number,
+  limit: number
+): Todo[] {
   return todos.slice(offset, offset + limit);
 }
 
@@ -184,7 +192,7 @@ function canReuseOrder(
 }
 
 function buildListResponse(
-  paged: Todo[],
+  paged: readonly Todo[],
   counts: CountSummary,
   normalized: NormalizedFilters
 ): CallToolResult {
@@ -224,7 +232,11 @@ async function handleListTodos(
 
   const todayIso = getTodayIso();
   const counts = computeCounts(allTodos, todayIso);
-  const sorted = canReuseOrder(normalized.sortBy, normalized.order, counts)
+  const sorted: readonly Todo[] = canReuseOrder(
+    normalized.sortBy,
+    normalized.order,
+    counts
+  )
     ? allTodos
     : sortTodos(allTodos, normalized.sortBy, normalized.order);
   const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
