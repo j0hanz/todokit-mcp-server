@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { type Todo, TodosSchema } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -142,16 +143,22 @@ function shouldRetry(error: Error, attempt: number): boolean {
   return isTransientError(error) && attempt < 2;
 }
 
-async function renameWithRetry(from: string, to: string): Promise<void> {
+async function renameWithRetryCount(from: string, to: string): Promise<number> {
+  let retries = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     const error = await tryRename(from, to);
-    if (!error) return;
+    if (!error) return retries;
     if (!shouldRetry(error, attempt)) throw error;
+    retries += 1;
     await delay(50 * (attempt + 1));
   }
+  return retries;
 }
 
-async function writeFileAtomic(path: string, contents: string): Promise<void> {
+async function writeFileAtomic(
+  path: string,
+  contents: string
+): Promise<number> {
   await mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.${randomUUID()}.tmp`;
 
@@ -161,27 +168,58 @@ async function writeFileAtomic(path: string, contents: string): Promise<void> {
       flush: true,
       signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     });
-    await renameWithRetry(tempPath, path);
+    return await renameWithRetryCount(tempPath, path);
   } finally {
     await rm(tempPath, { force: true }).catch(noop);
   }
 }
 
 async function saveTodos(path: string, todos: Todo[]): Promise<void> {
+  const start = nowMs();
   const payload = `${JSON.stringify(todos, null, 2)}\n`;
-  await writeFileAtomic(path, payload);
+  const renameRetries = await writeFileAtomic(path, payload);
   cache = { todos, mtimeMs: await getFileMtime(path) };
+
+  publishStorageEvent({
+    v: 1,
+    kind: 'storage',
+    op: 'write',
+    at: new Date().toISOString(),
+    durationMs: Math.max(0, nowMs() - start),
+    todoCount: todos.length,
+    renameRetries,
+  });
 }
 
 export async function readTodos(): Promise<Todo[]> {
+  const start = nowMs();
   await writeQueue;
   const path = getTodoFilePath();
   const mtimeMs = await getFileMtime(path);
   if (cache?.mtimeMs === mtimeMs) {
+    publishStorageEvent({
+      v: 1,
+      kind: 'storage',
+      op: 'read',
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, nowMs() - start),
+      cacheHit: true,
+      todoCount: cache.todos.length,
+    });
     return cache.todos;
   }
   const todos = await loadTodos(path);
   cache = { todos, mtimeMs };
+
+  publishStorageEvent({
+    v: 1,
+    kind: 'storage',
+    op: 'read',
+    at: new Date().toISOString(),
+    durationMs: Math.max(0, nowMs() - start),
+    cacheHit: false,
+    todoCount: todos.length,
+  });
   return todos;
 }
 
@@ -201,7 +239,16 @@ export async function withTodos<T>(
 }
 
 export async function closeDb(): Promise<void> {
+  const start = nowMs();
   await writeQueue;
   writeQueue = Promise.resolve();
   cache = null;
+
+  publishStorageEvent({
+    v: 1,
+    kind: 'storage',
+    op: 'close',
+    at: new Date().toISOString(),
+    durationMs: Math.max(0, nowMs() - start),
+  });
 }

@@ -15,6 +15,11 @@ import './setup.js';
 const TEST_TIMEOUT_MS = 5000;
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
+  it('generates uuid-like ids', async () => {
+    const todo = await addTodo('ID Check');
+    assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
+  });
+
   it('normalizes tags', () => {
     assert.deepEqual(normalizeTags([' Work ', 'work', '', 'Home']), [
       'work',
@@ -81,5 +86,13 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
 
     const remaining = await getTodos();
     assert.equal(remaining.length, 0);
+  });
+
+  it('serializes concurrent writes', async () => {
+    const count = 25;
+    const titles = Array.from({ length: count }, (_, index) => `Task ${index}`);
+    await Promise.all(titles.map((title) => addTodo(title)));
+    const todos = await getTodos();
+    assert.equal(todos.length, count);
   });
 });

@@ -5,7 +5,13 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { parseCliArgs } from './lib/cli.js';
 import { closeDb } from './lib/db.js';
+import {
+  enableDefaultDiagnosticsSubscribers,
+  publishLifecycleEvent,
+} from './lib/diagnostics.js';
+import { createStderrLogger } from './lib/log.js';
 import { registerAllTools } from './tools/index.js';
 
 const require = createRequire(import.meta.url);
@@ -14,6 +20,40 @@ const SERVER_VERSION = packageJson.version ?? '0.0.0';
 
 let shuttingDown = false;
 let activeServer: McpServer | null = null;
+let disableDiagnostics: (() => void) | null = null;
+
+async function closeDbSafely(): Promise<void> {
+  try {
+    await closeDb();
+  } catch (error: unknown) {
+    console.error('Error closing database:', error);
+  }
+}
+
+function disableDiagnosticsSafely(): void {
+  try {
+    disableDiagnostics?.();
+  } catch {
+    // Ignore.
+  } finally {
+    disableDiagnostics = null;
+  }
+}
+
+async function closeServerSafely(signal: NodeJS.Signals): Promise<void> {
+  if (!activeServer) {
+    process.exitCode = 0;
+    return;
+  }
+
+  try {
+    await activeServer.close();
+    process.exitCode = 0;
+  } catch (error: unknown) {
+    console.error(`Shutdown error (${signal}):`, error);
+    process.exitCode = 1;
+  }
+}
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -32,25 +72,17 @@ export async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  try {
-    await closeDb();
-  } catch (error: unknown) {
-    console.error('Error closing database:', error);
-  }
+  publishLifecycleEvent({
+    v: 1,
+    kind: 'lifecycle',
+    event: 'shutdown',
+    at: new Date().toISOString(),
+    signal,
+  });
 
-  if (!activeServer) {
-    process.exitCode = 0;
-    return;
-  }
-
-  try {
-    await activeServer.close();
-  } catch (error: unknown) {
-    console.error(`Shutdown error (${signal}):`, error);
-    process.exitCode = 1;
-    return;
-  }
-  process.exitCode = 0;
+  await closeDbSafely();
+  disableDiagnosticsSafely();
+  await closeServerSafely(signal);
 }
 
 export async function startServer(): Promise<void> {
@@ -71,6 +103,20 @@ process.on('uncaughtException', (error: Error) => {
 
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
+  const cli = parseCliArgs(process.argv);
+  if (cli.todoFile) {
+    process.env.TODOKIT_TODO_FILE = cli.todoFile;
+  }
+
+  if (cli.diagnostics) {
+    const logger = createStderrLogger(cli.logLevel);
+    disableDiagnostics = enableDefaultDiagnosticsSubscribers({
+      logger: (line: string): void => {
+        logger.debug(line);
+      },
+    });
+  }
+
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 
