@@ -73,22 +73,6 @@ export async function getTodos(
   return filters ? filterTodos(todos, filters) : todos;
 }
 
-export async function addTodo(
-  title: string,
-  description?: string,
-  priority: 'low' | 'normal' | 'high' = 'normal',
-  dueDate?: string,
-  tags: string[] = []
-): Promise<Todo> {
-  const [todo] = await addTodos([
-    { title, description, priority, dueDate, tags },
-  ]);
-  if (!todo) {
-    throw new Error('Failed to create todo');
-  }
-  return todo;
-}
-
 function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
   return {
     id: randomUUID(),

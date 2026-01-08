@@ -14,17 +14,10 @@ import {
 import { createStderrLogger } from './lib/log.js';
 import { registerAllTools } from './tools/index.js';
 
-const SERVER_VERSION = getPackageVersion(packageJson);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function getPackageVersion(value: unknown): string {
-  if (!isRecord(value)) return '0.0.0';
-  const { version } = value;
-  return typeof version === 'string' && version.length > 0 ? version : '0.0.0';
-}
+const SERVER_VERSION =
+  typeof packageJson.version === 'string' && packageJson.version.length > 0
+    ? packageJson.version
+    : '0.0.0';
 
 let shuttingDown = false;
 let activeServer: McpServer | null = null;

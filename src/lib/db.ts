@@ -52,10 +52,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-function noop(): void {
-  // Intentionally empty
-}
-
 function getTodoFilePath(): string {
   const override = process.env.TODOKIT_TODO_FILE?.trim();
   if (override) {
@@ -176,7 +172,7 @@ async function writeFileAtomic(
     });
     return await renameWithRetryCount(tempPath, path);
   } finally {
-    await rm(tempPath, { force: true }).catch(noop);
+    await rm(tempPath, { force: true }).catch(() => undefined);
   }
 }
 

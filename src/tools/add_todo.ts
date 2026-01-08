@@ -4,7 +4,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
 import { createErrorResponse, getErrorMessage } from '../lib/errors.js';
-import { addTodo } from '../lib/storage.js';
+import { addTodos } from '../lib/storage.js';
 import { createToolResponse } from '../lib/tool_response.js';
 import { AddTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
@@ -26,7 +26,12 @@ const addTodoToolConfig = {
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
   const { title, description, priority, dueDate, tags } = input;
   try {
-    const todo = await addTodo(title, description, priority, dueDate, tags);
+    const [todo] = await addTodos([
+      { title, description, priority, dueDate, tags },
+    ]);
+    if (!todo) {
+      throw new Error('Failed to create todo');
+    }
     return createToolResponse({
       ok: true,
       result: {

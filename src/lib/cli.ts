@@ -22,25 +22,6 @@ function isLogLevel(value: unknown): value is LogLevel {
   );
 }
 
-function resolveTodoFile(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function resolveLogLevel(value: unknown, fallback: LogLevel): LogLevel {
-  return isLogLevel(value) ? value : fallback;
-}
-
-function buildCliOptions(
-  values: ParsedValues,
-  defaults: CliOptions
-): CliOptions {
-  return {
-    todoFile: resolveTodoFile(values['todo-file']),
-    diagnostics: values.diagnostics === true,
-    logLevel: resolveLogLevel(values['log-level'], defaults.logLevel),
-  };
-}
-
 export function parseCliArgs(argv: readonly string[]): CliOptions {
   const defaults: CliOptions = {
     todoFile: undefined,
@@ -63,7 +44,19 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     });
 
     const values = parsed.values as ParsedValues;
-    return buildCliOptions(values, defaults);
+    const todoFile =
+      typeof values['todo-file'] === 'string' && values['todo-file'].length > 0
+        ? values['todo-file']
+        : undefined;
+    const logLevel = isLogLevel(values['log-level'])
+      ? values['log-level']
+      : defaults.logLevel;
+
+    return {
+      todoFile,
+      diagnostics: values.diagnostics === true,
+      logLevel,
+    };
   } catch {
     return defaults;
   }
