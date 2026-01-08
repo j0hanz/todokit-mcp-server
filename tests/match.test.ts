@@ -6,7 +6,7 @@ import {
   resolveTodoTargetFromTodos,
   toResolveInput,
 } from '../src/lib/resolve.js';
-import { addTodo, getTodos } from '../src/lib/storage.js';
+import { addTodos, getTodos } from '../src/lib/storage.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
@@ -22,7 +22,8 @@ describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('resolves by id', async () => {
-    const todo = await addTodo('Match A');
+    const [todo] = await addTodos([{ title: 'Match A' }]);
+    assert.ok(todo);
     const result = await resolveTodoTarget({ id: todo.id });
     assert.equal(result.kind, 'match');
     if (result.kind === 'match') {
@@ -39,8 +40,7 @@ describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('returns ambiguous for multiple matches', async () => {
-    await addTodo('Shared Task');
-    await addTodo('Shared Task Two');
+    await addTodos([{ title: 'Shared Task' }, { title: 'Shared Task Two' }]);
 
     const result = await resolveTodoTarget({ query: 'Shared' });
     assert.equal(result.kind, 'ambiguous');

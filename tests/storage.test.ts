@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  addTodo,
+  addTodos,
   deleteTodoBySelector,
   getTodos,
   normalizeTags,
@@ -14,7 +14,8 @@ const TEST_TIMEOUT_MS = 5000;
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('generates uuid-like ids', async () => {
-    const todo = await addTodo('ID Check');
+    const [todo] = await addTodos([{ title: 'ID Check' }]);
+    assert.ok(todo);
     assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
 
@@ -26,13 +27,24 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('adds todos and filters by fields', async () => {
-    const todoA = await addTodo('Alpha', 'Alpha desc', 'high', '2025-01-10', [
-      'Work',
+    const [todoA, todoB] = await addTodos([
+      {
+        title: 'Alpha',
+        description: 'Alpha desc',
+        priority: 'high',
+        dueDate: '2025-01-10',
+        tags: ['Work'],
+      },
+      {
+        title: 'Beta',
+        priority: 'low',
+        dueDate: '2025-01-05',
+        tags: ['Home'],
+      },
+      { title: 'Gamma', priority: 'normal' },
     ]);
-    const todoB = await addTodo('Beta', undefined, 'low', '2025-01-05', [
-      'Home',
-    ]);
-    await addTodo('Gamma', undefined, 'normal');
+    assert.ok(todoA);
+    assert.ok(todoB);
 
     const byTag = await getTodos({ tag: 'work' });
     assert.deepEqual(
@@ -60,7 +72,8 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('updates todo completion and tags', async () => {
-    const todo = await addTodo('Delta');
+    const [todo] = await addTodos([{ title: 'Delta' }]);
+    assert.ok(todo);
 
     const completed = await updateTodoBySelector({ id: todo.id }, () => ({
       completed: true,
@@ -93,7 +106,8 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('deletes todos', async () => {
-    const todo = await addTodo('Epsilon');
+    const [todo] = await addTodos([{ title: 'Epsilon' }]);
+    assert.ok(todo);
     const deleted = await deleteTodoBySelector({ id: todo.id });
     assert.equal(deleted.kind, 'match');
 
@@ -107,7 +121,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('serializes concurrent writes', async () => {
     const count = 25;
     const titles = Array.from({ length: count }, (_, index) => `Task ${index}`);
-    await Promise.all(titles.map((title) => addTodo(title)));
+    await Promise.all(titles.map((title) => addTodos([{ title }])));
     const todos = await getTodos();
     assert.equal(todos.length, count);
   });

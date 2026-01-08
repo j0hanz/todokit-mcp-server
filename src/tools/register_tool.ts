@@ -36,61 +36,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function getStructuredContent(result: CallToolResult): unknown {
-  return result.structuredContent;
-}
-
-function getOkFlag(structured: unknown): boolean | undefined {
-  if (!isRecord(structured)) return undefined;
-  const { ok } = structured;
-  return typeof ok === 'boolean' ? ok : undefined;
-}
-
-function getErrorCode(structured: unknown): string | undefined {
-  if (!isRecord(structured)) return undefined;
-  const { error } = structured;
-  if (!isRecord(error)) return undefined;
-  const { code } = error;
-  return typeof code === 'string' ? code : undefined;
-}
-
 function extractOutcome(result: CallToolResult): {
   ok: boolean;
   errorCode?: string | undefined;
 } {
-  const structured = getStructuredContent(result);
-  const ok = getOkFlag(structured);
+  const structured = result.structuredContent;
+  if (!isRecord(structured)) return { ok: true };
+  const { ok, error } = structured;
   if (ok !== false) return { ok: true };
-  return { ok: false, errorCode: getErrorCode(structured) };
-}
-
-function publishSuccess(
-  tool: string,
-  start: number,
-  result: CallToolResult
-): void {
-  const durationMs = Math.max(0, nowMs() - start);
-  const outcome = extractOutcome(result);
-  publishToolResult({
-    v: 1,
-    kind: 'tool_result',
-    tool,
-    at: new Date().toISOString(),
-    durationMs,
-    ok: outcome.ok,
-    errorCode: outcome.errorCode,
-  });
-}
-
-function publishFailure(tool: string, start: number): void {
-  publishToolResult({
-    v: 1,
-    kind: 'tool_result',
-    tool,
-    at: new Date().toISOString(),
-    durationMs: Math.max(0, nowMs() - start),
-    ok: false,
-  });
+  if (!isRecord(error)) return { ok: false };
+  const { code } = error;
+  return { ok: false, errorCode: typeof code === 'string' ? code : undefined };
 }
 
 type ToolInput<InputArgs extends AnySchema> = SchemaOutput<InputArgs>;
@@ -108,11 +64,28 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     const result = handler(input, extra);
     return Promise.resolve(result)
       .then((resolved) => {
-        publishSuccess(tool, start, resolved);
+        const durationMs = Math.max(0, nowMs() - start);
+        const outcome = extractOutcome(resolved);
+        publishToolResult({
+          v: 1,
+          kind: 'tool_result',
+          tool,
+          at: new Date().toISOString(),
+          durationMs,
+          ok: outcome.ok,
+          errorCode: outcome.errorCode,
+        });
         return resolved;
       })
       .catch((error: unknown) => {
-        publishFailure(tool, start);
+        publishToolResult({
+          v: 1,
+          kind: 'tool_result',
+          tool,
+          at: new Date().toISOString(),
+          durationMs: Math.max(0, nowMs() - start),
+          ok: false,
+        });
         throw error;
       });
   };

@@ -4,7 +4,11 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodo, getTodos, updateTodoBySelector } from '../src/lib/storage.js';
+import {
+  addTodos,
+  getTodos,
+  updateTodoBySelector,
+} from '../src/lib/storage.js';
 import { registerAddTodo } from '../src/tools/add_todo.js';
 import { registerAddTodos } from '../src/tools/add_todos.js';
 import { registerCompleteTodo } from '../src/tools/complete_todo.js';
@@ -101,8 +105,10 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     });
 
     try {
-      await addTodo('Alpha', undefined, 'high', '2025-01-05');
-      await addTodo('Beta', undefined, 'low', '2025-01-12');
+      await addTodos([
+        { title: 'Alpha', priority: 'high', dueDate: '2025-01-05' },
+        { title: 'Beta', priority: 'low', dueDate: '2025-01-12' },
+      ]);
 
       const listHandler = getHandler<{ sortBy: string; order: string }>(
         'list_todos'
@@ -145,8 +151,12 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
 
-    const pending = await addTodo('Pending');
-    const completed = await addTodo('Completed');
+    const [pending, completed] = await addTodos([
+      { title: 'Pending' },
+      { title: 'Completed' },
+    ]);
+    assert.ok(pending);
+    assert.ok(completed);
     await updateTodoBySelector({ id: completed.id }, () => ({
       completed: true,
     }));
@@ -180,7 +190,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerCompleteTodo(server);
     registerDeleteTodo(server);
 
-    const todo = await addTodo('Manage');
+    const [todo] = await addTodos([{ title: 'Manage' }]);
+    assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
@@ -205,13 +216,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerUpdateTodo(server);
 
-    const todo = await addTodo(
-      'Update Me',
-      'Has description',
-      'normal',
-      '2025-02-01',
-      ['alpha', 'beta']
-    );
+    const [todo] = await addTodos([
+      {
+        title: 'Update Me',
+        description: 'Has description',
+        priority: 'normal',
+        dueDate: '2025-02-01',
+        tags: ['alpha', 'beta'],
+      },
+    ]);
+    assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
@@ -235,7 +249,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerCompleteTodo(server);
 
-    const todo = await addTodo('Finish Me');
+    const [todo] = await addTodos([{ title: 'Finish Me' }]);
+    assert.ok(todo);
     const completeHandler = getHandler<{ id: string; completed?: boolean }>(
       'complete_todo'
     );
@@ -273,9 +288,11 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodos(server);
 
-    await addTodo('Keep Me');
-    await addTodo('Batch One');
-    await addTodo('Batch Two');
+    await addTodos([
+      { title: 'Keep Me' },
+      { title: 'Batch One' },
+      { title: 'Batch Two' },
+    ]);
 
     const deleteHandler = getHandler<{
       query: string;
@@ -310,8 +327,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
 
-    await addTodo('Shared Item');
-    await addTodo('Shared Item Two');
+    await addTodos([{ title: 'Shared Item' }, { title: 'Shared Item Two' }]);
 
     const deleteHandler = getHandler<{ query: string; dryRun: boolean }>(
       'delete_todo'
@@ -327,9 +343,12 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
 
-    const todo = await addTodo('Unique Delete');
-    await addTodo('Batch Delete One');
-    await addTodo('Batch Delete Two');
+    const [todo] = await addTodos([
+      { title: 'Unique Delete' },
+      { title: 'Batch Delete One' },
+      { title: 'Batch Delete Two' },
+    ]);
+    assert.ok(todo);
 
     const deleteHandler = getHandler<{
       id?: string;
