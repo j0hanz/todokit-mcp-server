@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { type Todo, TodosSchema } from './types.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TODO_FILE = join(__dirname, '../../todos.json');
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_TODO_FILE = join(moduleDir, '../../todos.json');
 
 const IO_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 30_000;
@@ -35,7 +35,7 @@ const TRANSIENT_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 
 function getErrorCode(error: unknown): string | undefined {
   if (!isRecord(error)) return undefined;
-  const code = error.code;
+  const { code } = error;
   return typeof code === 'string' ? code : undefined;
 }
 
