@@ -42,15 +42,15 @@ function getStructuredContent(result: CallToolResult): unknown {
 
 function getOkFlag(structured: unknown): boolean | undefined {
   if (!isRecord(structured)) return undefined;
-  const ok = structured.ok;
+  const { ok } = structured;
   return typeof ok === 'boolean' ? ok : undefined;
 }
 
 function getErrorCode(structured: unknown): string | undefined {
   if (!isRecord(structured)) return undefined;
-  const error = structured.error;
+  const { error } = structured;
   if (!isRecord(error)) return undefined;
-  const code = error.code;
+  const { code } = error;
   return typeof code === 'string' ? code : undefined;
 }
 

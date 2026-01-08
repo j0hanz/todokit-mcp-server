@@ -22,7 +22,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getPackageVersion(value: unknown): string {
   if (!isRecord(value)) return '0.0.0';
-  const version = value.version;
+  const { version } = value;
   return typeof version === 'string' && version.length > 0 ? version : '0.0.0';
 }
 

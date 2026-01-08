@@ -103,6 +103,18 @@ function safeStringify(value: unknown): string {
   }
 }
 
+function createDiagnosticsSubscriber(
+  logger: Logger
+): (message: unknown) => void {
+  return (message: unknown): void => {
+    try {
+      logger(safeStringify(message));
+    } catch {
+      // Ignore.
+    }
+  };
+}
+
 export function enableDefaultDiagnosticsSubscribers(options?: {
   logger?: Logger | undefined;
 }): () => void {
@@ -112,37 +124,15 @@ export function enableDefaultDiagnosticsSubscribers(options?: {
       console.error(line);
     });
 
-  const onTool = (message: unknown): void => {
-    try {
-      logger(safeStringify(message));
-    } catch {
-      // Ignore.
-    }
-  };
+  const onMessage = createDiagnosticsSubscriber(logger);
 
-  const onStorage = (message: unknown): void => {
-    try {
-      logger(safeStringify(message));
-    } catch {
-      // Ignore.
-    }
-  };
-
-  const onLifecycle = (message: unknown): void => {
-    try {
-      logger(safeStringify(message));
-    } catch {
-      // Ignore.
-    }
-  };
-
-  subscribe('todokit:tool', onTool);
-  subscribe('todokit:storage', onStorage);
-  subscribe('todokit:lifecycle', onLifecycle);
+  subscribe('todokit:tool', onMessage);
+  subscribe('todokit:storage', onMessage);
+  subscribe('todokit:lifecycle', onMessage);
 
   return () => {
-    unsubscribe('todokit:tool', onTool);
-    unsubscribe('todokit:storage', onStorage);
-    unsubscribe('todokit:lifecycle', onLifecycle);
+    unsubscribe('todokit:tool', onMessage);
+    unsubscribe('todokit:storage', onMessage);
+    unsubscribe('todokit:lifecycle', onMessage);
   };
 }
