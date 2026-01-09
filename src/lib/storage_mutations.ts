@@ -2,14 +2,12 @@ import { createErrorResponse } from './errors.js';
 import type { MatchOutcome } from './resolve.js';
 import type { Todo } from './types.js';
 
-export interface TodoUpdate {
-  title?: string;
-  description?: string | undefined;
-  completed?: boolean;
-  priority?: Todo['priority'];
-  dueDate?: string | undefined;
-  tags?: string[];
-}
+export type TodoUpdate = Partial<
+  Pick<
+    Todo,
+    'title' | 'description' | 'completed' | 'priority' | 'dueDate' | 'tags'
+  >
+>;
 
 export function createNotFoundOutcome(id: string): MatchOutcome {
   return {

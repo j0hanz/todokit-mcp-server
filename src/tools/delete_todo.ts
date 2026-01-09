@@ -18,6 +18,10 @@ import { registerToolWithDiagnostics } from './register_tool.js';
 
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
 
+function getSelector(input: DeleteTodoInput): { id?: string; query?: string } {
+  return input.id !== undefined ? { id: input.id } : { query: input.query };
+}
+
 function buildDryRunMultiple(
   previews: readonly unknown[],
   total: number
@@ -47,42 +51,29 @@ function buildDeleteResponse(todo: Todo, dryRun: boolean): CallToolResult {
   });
 }
 
-async function handleDeleteTodoDryRun(
+async function handleDeleteTodo(
   input: DeleteTodoInput
 ): Promise<CallToolResult> {
-  const todos = await getTodos();
-  const selector =
-    input.id !== undefined ? { id: input.id } : { query: input.query };
-  const outcome = unwrapResolution(
-    resolveTodoTargetFromTodos(todos, toResolveInput(selector))
-  );
-  if (outcome.kind === 'error') return outcome.response;
-  if (outcome.kind === 'ambiguous') {
-    return buildDryRunMultiple(outcome.previews, outcome.matches.length);
-  }
-  return buildDeleteResponse(outcome.todo, true);
-}
+  const selector = getSelector(input);
+  const dryRun = input.dryRun ?? false;
 
-async function handleDeleteTodoLive(
-  input: DeleteTodoInput
-): Promise<CallToolResult> {
-  const selector =
-    input.id !== undefined ? { id: input.id } : { query: input.query };
+  if (dryRun) {
+    const todos = await getTodos();
+    const outcome = unwrapResolution(
+      resolveTodoTargetFromTodos(todos, toResolveInput(selector))
+    );
+    if (outcome.kind === 'error') return outcome.response;
+    if (outcome.kind === 'ambiguous') {
+      return buildDryRunMultiple(outcome.previews, outcome.matches.length);
+    }
+    return buildDeleteResponse(outcome.todo, true);
+  }
+
   const outcome = await deleteTodoBySelector(toResolveInput(selector));
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }
   return buildDeleteResponse(outcome.todo, false);
-}
-
-async function handleDeleteTodo(
-  input: DeleteTodoInput
-): Promise<CallToolResult> {
-  const dryRun = input.dryRun ?? false;
-  if (dryRun) {
-    return handleDeleteTodoDryRun(input);
-  }
-  return handleDeleteTodoLive(input);
 }
 
 export function registerDeleteTodo(server: McpServer): void {

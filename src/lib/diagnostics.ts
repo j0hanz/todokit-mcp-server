@@ -46,6 +46,11 @@ export interface LifecycleEvent {
 const toolDiagnosticsChannel: Channel = channel('todokit:tool');
 const storageDiagnosticsChannel: Channel = channel('todokit:storage');
 const lifecycleDiagnosticsChannel: Channel = channel('todokit:lifecycle');
+const DIAGNOSTIC_CHANNELS = [
+  'todokit:tool',
+  'todokit:storage',
+  'todokit:lifecycle',
+] as const;
 
 function safePublish(target: Channel, message: unknown): void {
   try {
@@ -126,13 +131,13 @@ export function enableDefaultDiagnosticsSubscribers(options?: {
 
   const onMessage = createDiagnosticsSubscriber(logger);
 
-  subscribe('todokit:tool', onMessage);
-  subscribe('todokit:storage', onMessage);
-  subscribe('todokit:lifecycle', onMessage);
+  for (const channelName of DIAGNOSTIC_CHANNELS) {
+    subscribe(channelName, onMessage);
+  }
 
   return () => {
-    unsubscribe('todokit:tool', onMessage);
-    unsubscribe('todokit:storage', onMessage);
-    unsubscribe('todokit:lifecycle', onMessage);
+    for (const channelName of DIAGNOSTIC_CHANNELS) {
+      unsubscribe(channelName, onMessage);
+    }
   };
 }

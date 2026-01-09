@@ -97,7 +97,22 @@ interface SelectorSchemas {
   byQuery: SelectorByQuerySchema;
 }
 
-const TagSchema = z.string().min(1).max(50);
+export const TagSchema = z.string().min(1).max(50);
+export const PrioritySchema: ZodType<Priority> = z.enum([
+  'low',
+  'normal',
+  'high',
+]);
+export const StatusSchema: ZodType<Status> = z.enum([
+  'pending',
+  'completed',
+  'all',
+]);
+const ClearFieldSchema: ZodType<ClearField> = z.enum([
+  'description',
+  'dueDate',
+  'tags',
+]);
 const SortBySchema: ZodType<SortBy> = z.enum([
   'dueDate',
   'priority',
@@ -128,10 +143,9 @@ const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
     .max(2000)
     .optional()
     .describe('Optional description of the todo'),
-  priority: z
-    .enum(['low', 'normal', 'high'])
-    .optional()
-    .describe('Priority level (default: normal)'),
+  priority: PrioritySchema.optional().describe(
+    'Priority level (default: normal)'
+  ),
   dueDate: IsoDateSchema.optional().describe(
     'Due date in ISO format (YYYY-MM-DD)'
   ),
@@ -156,40 +170,32 @@ const deleteTodoSelector = buildSelectorSchemas(
   'The ID of the todo to delete',
   'Search text to find a single todo to delete'
 );
+const DeleteTodoFields = {
+  dryRun: z
+    .boolean()
+    .optional()
+    .describe('Simulate the deletion without changing data'),
+};
 
 export const DeleteTodoSchema: ZodType<DeleteTodoInput> = z.union([
-  deleteTodoSelector.byId.extend({
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('Simulate the deletion without changing data'),
-  }),
-  deleteTodoSelector.byQuery.extend({
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('Simulate the deletion without changing data'),
-  }),
+  deleteTodoSelector.byId.extend(DeleteTodoFields),
+  deleteTodoSelector.byQuery.extend(DeleteTodoFields),
 ]);
 
 const completeTodoSelector = buildSelectorSchemas(
   'The ID of the todo to complete',
   'Search text to find a single todo to complete'
 );
+const CompleteTodoFields = {
+  completed: z
+    .boolean()
+    .optional()
+    .describe('Set completion status (default: true)'),
+};
 
 export const CompleteTodoSchema: ZodType<CompleteTodoInput> = z.union([
-  completeTodoSelector.byId.extend({
-    completed: z
-      .boolean()
-      .optional()
-      .describe('Set completion status (default: true)'),
-  }),
-  completeTodoSelector.byQuery.extend({
-    completed: z
-      .boolean()
-      .optional()
-      .describe('Set completion status (default: true)'),
-  }),
+  completeTodoSelector.byId.extend(CompleteTodoFields),
+  completeTodoSelector.byQuery.extend(CompleteTodoFields),
 ]);
 
 const TagOpsSchema: ZodType<TagOpsInput> = z.strictObject({
@@ -206,14 +212,11 @@ const UpdateTodoFieldsSchema = {
   title: z.string().min(1).max(200).optional().describe('New title'),
   description: z.string().max(2000).optional().describe('New description'),
   completed: z.boolean().optional().describe('Completion status'),
-  priority: z
-    .enum(['low', 'normal', 'high'])
-    .optional()
-    .describe('New priority level'),
+  priority: PrioritySchema.optional().describe('New priority level'),
   dueDate: IsoDateSchema.optional().describe('New due date (ISO format)'),
   tags: z.array(TagSchema).max(50).optional().describe('New tags'),
   clearFields: z
-    .array(z.enum(['description', 'dueDate', 'tags']))
+    .array(ClearFieldSchema)
     .max(3)
     .optional()
     .describe('Fields to clear'),
@@ -231,20 +234,14 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       .boolean()
       .optional()
       .describe('Filter by completion status (deprecated; use status)'),
-    status: z
-      .enum(['pending', 'completed', 'all'])
-      .optional()
-      .describe('Filter by status'),
+    status: StatusSchema.optional().describe('Filter by status'),
     query: z
       .string()
       .min(1)
       .max(200)
       .optional()
       .describe('Search text in title, description, or tags'),
-    priority: z
-      .enum(['low', 'normal', 'high'])
-      .optional()
-      .describe('Filter by priority level'),
+    priority: PrioritySchema.optional().describe('Filter by priority level'),
     tag: TagSchema.optional().describe('Filter by tag (must contain)'),
     dueBefore: IsoDateSchema.optional().describe(
       'Filter todos due before this date (ISO format)'

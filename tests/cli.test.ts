@@ -39,4 +39,11 @@ describe('cli', { timeout: TEST_TIMEOUT_MS }, () => {
     ]);
     assert.equal(invalid.logLevel, 'info');
   });
+
+  it('returns defaults when argv is invalid', () => {
+    const result = parseCliArgs(null as unknown as string[]);
+    assert.equal(result.todoFile, undefined);
+    assert.equal(result.diagnostics, false);
+    assert.equal(result.logLevel, 'info');
+  });
 });

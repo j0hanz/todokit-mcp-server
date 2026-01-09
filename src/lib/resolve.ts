@@ -123,27 +123,20 @@ function resolveByQueryFromTodos(
     return { kind: 'missing', response: createMissingIdentifierError() };
   }
   const matches = filterTodos(todos, { query: trimmedQuery });
-  return resolveQueryMatches(trimmedQuery, matches);
-}
-
-function resolveQueryMatches(
-  query: string,
-  matches: readonly Todo[]
-): ResolveTodoResult {
   const [firstMatch] = matches;
   if (matches.length === 1 && firstMatch) {
     return { kind: 'match', todo: firstMatch };
   }
   if (matches.length === 0) {
-    return { kind: 'not_found', response: createNotFoundError(query) };
+    return { kind: 'not_found', response: createNotFoundError(trimmedQuery) };
   }
-  const { response, previews } = createAmbiguousError(query, matches);
+  const { response, previews } = createAmbiguousError(trimmedQuery, matches);
   return {
     kind: 'ambiguous',
     response,
     matches,
     previews,
-    query,
+    query: trimmedQuery,
   };
 }
 

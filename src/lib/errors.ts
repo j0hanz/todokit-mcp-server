@@ -18,11 +18,6 @@ function normalizeMessage(message: unknown): string | undefined {
   return message;
 }
 
-function extractMessageObject(error: unknown): string | undefined {
-  if (!isRecord(error)) return undefined;
-  return normalizeMessage(error.message);
-}
-
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const message = normalizeMessage(error.message);
@@ -30,7 +25,11 @@ export function getErrorMessage(error: unknown): string {
   }
   const directMessage = normalizeMessage(error);
   if (directMessage) return directMessage;
-  return extractMessageObject(error) ?? 'Unknown error';
+  if (isRecord(error)) {
+    const recordMessage = normalizeMessage(error.message);
+    if (recordMessage) return recordMessage;
+  }
+  return 'Unknown error';
 }
 
 export function createErrorResponse(

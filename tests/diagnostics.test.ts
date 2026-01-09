@@ -5,7 +5,10 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { z } from 'zod';
+
 import { registerAllTools } from '../src/tools/index.js';
+import { registerToolWithDiagnostics } from '../src/tools/register_tool.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
@@ -89,6 +92,40 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
     } finally {
       unsubscribe('todokit:tool', onTool);
       unsubscribe('todokit:storage', onStorage);
+    }
+  });
+
+  it('publishes tool_result on handler error', async () => {
+    const toolEvents: unknown[] = [];
+
+    const onTool = (message: unknown): void => {
+      toolEvents.push(message);
+    };
+
+    subscribe('todokit:tool', onTool);
+
+    try {
+      const { server, getHandler } = createToolHarness();
+      registerToolWithDiagnostics(
+        server,
+        'fail_tool',
+        { title: 'Fail Tool', inputSchema: z.strictObject({}) },
+        async () => {
+          throw new Error('boom');
+        }
+      );
+
+      const handler = getHandler<Record<string, never>>('fail_tool');
+      await assert.rejects(() => handler({}), /boom/);
+
+      assert.ok(
+        toolEvents.some((event) => {
+          if (!isRecord(event)) return false;
+          return event.kind === 'tool_result' && event.tool === 'fail_tool';
+        })
+      );
+    } finally {
+      unsubscribe('todokit:tool', onTool);
     }
   });
 });

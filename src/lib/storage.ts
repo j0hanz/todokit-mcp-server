@@ -135,6 +135,23 @@ function applyUpdateToTodos(
   return { todos: todos.with(index, updatedTodo), result: updatedTodo };
 }
 
+function buildUpdateOutcome(
+  updated: { todos: Todo[]; result: Todo | null },
+  id: string
+): { todos: Todo[]; result: MatchOutcome } {
+  if (!updated.result) {
+    return {
+      todos: updated.todos,
+      result: createNotFoundOutcome(id),
+    };
+  }
+
+  return {
+    todos: updated.todos,
+    result: { kind: 'match', todo: updated.result },
+  };
+}
+
 export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
 
 export async function updateTodoBySelector(
@@ -153,17 +170,7 @@ export async function updateTodoBySelector(
     }
 
     const updated = applyUpdateToTodos(todos, outcome.todo.id, updates);
-    if (!updated.result) {
-      return {
-        todos,
-        result: createNotFoundOutcome(outcome.todo.id),
-      };
-    }
-
-    return {
-      todos: updated.todos,
-      result: { kind: 'match', todo: updated.result },
-    };
+    return buildUpdateOutcome(updated, outcome.todo.id);
   });
 }
 
@@ -203,17 +210,7 @@ export async function completeTodoBySelector(
     }
 
     const updated = applyUpdateToTodos(todos, outcome.todo.id, { completed });
-    if (!updated.result) {
-      return {
-        todos,
-        result: createNotFoundOutcome(outcome.todo.id),
-      };
-    }
-
-    return {
-      todos: updated.todos,
-      result: { kind: 'match', todo: updated.result },
-    };
+    return buildUpdateOutcome(updated, outcome.todo.id);
   });
 }
 

@@ -40,19 +40,17 @@ function matchesBasic(todo: Todo, filters: TodoFilters, tag?: string): boolean {
   );
 }
 
-function matchesDueBefore(todo: Todo, date?: string): boolean {
-  return !date || (!!todo.dueDate && todo.dueDate < date);
-}
-
-function matchesDueAfter(todo: Todo, date?: string): boolean {
-  return !date || (!!todo.dueDate && todo.dueDate > date);
-}
-
-function matchesDate(todo: Todo, filters: TodoFilters): boolean {
-  return (
-    matchesDueBefore(todo, filters.dueBefore) &&
-    matchesDueAfter(todo, filters.dueAfter)
-  );
+function matchesDueDateRange(
+  todo: Todo,
+  dueBefore?: string,
+  dueAfter?: string
+): boolean {
+  if (!dueBefore && !dueAfter) return true;
+  const { dueDate } = todo;
+  if (!dueDate) return false;
+  if (dueBefore && dueDate >= dueBefore) return false;
+  if (dueAfter && dueDate <= dueAfter) return false;
+  return true;
 }
 
 function matchesQuery(todo: Todo, query?: string): boolean {
@@ -73,7 +71,7 @@ export function filterTodos(
   return todos.filter(
     (todo) =>
       matchesBasic(todo, filters, tag) &&
-      matchesDate(todo, filters) &&
+      matchesDueDateRange(todo, filters.dueBefore, filters.dueAfter) &&
       matchesQuery(todo, query)
   );
 }

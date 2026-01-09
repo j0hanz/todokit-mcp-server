@@ -7,11 +7,10 @@ import { createErrorResponse, getErrorMessage } from '../lib/errors.js';
 import { deleteTodosByIds, getTodos } from '../lib/storage.js';
 import { createToolResponse } from '../lib/tool_response.js';
 import type { Todo } from '../lib/types.js';
+import { PrioritySchema, StatusSchema, TagSchema } from '../schemas/inputs.js';
 import { IsoDateSchema } from '../schemas/iso_date.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
 import { registerToolWithDiagnostics } from './register_tool.js';
-
-const TagSchema = z.string().min(1).max(50);
 
 type FilterKey =
   | 'status'
@@ -35,14 +34,8 @@ function hasAtLeastOneFilter(v: Record<string, unknown>): boolean {
 
 const DeleteTodosSchema = z
   .strictObject({
-    status: z
-      .enum(['pending', 'completed', 'all'])
-      .optional()
-      .describe('Filter by status'),
-    priority: z
-      .enum(['low', 'normal', 'high'])
-      .optional()
-      .describe('Filter by priority'),
+    status: StatusSchema.optional().describe('Filter by status'),
+    priority: PrioritySchema.optional().describe('Filter by priority'),
     tag: TagSchema.optional().describe('Filter by tag'),
     dueBefore: IsoDateSchema.optional().describe(
       'Delete todos due before this date (ISO format)'
@@ -70,13 +63,19 @@ const DeleteTodosSchema = z
 type DeleteTodosInput = z.infer<typeof DeleteTodosSchema>;
 
 const DEFAULT_LIMIT = 10;
+const COMPLETED_FILTER_BY_STATUS: Record<
+  'pending' | 'completed' | 'all',
+  boolean | undefined
+> = {
+  pending: false,
+  completed: true,
+  all: undefined,
+};
 
 function resolveCompletedFilter(
   status?: 'pending' | 'completed' | 'all'
 ): boolean | undefined {
-  if (status === 'pending') return false;
-  if (status === 'completed') return true;
-  return undefined;
+  return COMPLETED_FILTER_BY_STATUS[status ?? 'all'];
 }
 
 function buildPreview(todo: Todo): { id: string; title: string } {
@@ -128,8 +127,7 @@ function buildDeletedResponse(
 async function handleDeleteTodos(
   input: DeleteTodosInput
 ): Promise<CallToolResult> {
-  const limit = input.limit ?? DEFAULT_LIMIT;
-  const dryRun = input.dryRun ?? false;
+  const { limit = DEFAULT_LIMIT, dryRun = false } = input;
 
   const matches = await getTodos({
     completed: resolveCompletedFilter(input.status),
@@ -140,18 +138,19 @@ async function handleDeleteTodos(
     query: input.query,
   });
 
-  if (matches.length === 0) {
+  const totalMatched = matches.length;
+  if (totalMatched === 0) {
     return buildNoMatchResponse();
   }
 
   const toDelete = matches.slice(0, limit);
 
   if (dryRun) {
-    return buildDryRunResponse(toDelete, matches.length);
+    return buildDryRunResponse(toDelete, totalMatched);
   }
 
   const deletedIds = await deleteTodosByIds(toDelete.map((t) => t.id));
-  return buildDeletedResponse(deletedIds, matches.length);
+  return buildDeletedResponse(deletedIds, totalMatched);
 }
 
 export function registerDeleteTodos(server: McpServer): void {

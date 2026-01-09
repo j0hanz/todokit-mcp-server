@@ -6,12 +6,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import packageJson from '../package.json' with { type: 'json' };
 import { parseCliArgs } from './lib/cli.js';
-import { closeDb } from './lib/db.js';
 import {
   enableDefaultDiagnosticsSubscribers,
   publishLifecycleEvent,
 } from './lib/diagnostics.js';
 import { createStderrLogger } from './lib/log.js';
+import {
+  closeDbSafely,
+  closeServerSafely,
+  disableDiagnosticsSafely,
+} from './lib/runtime_helpers.js';
 import { registerAllTools } from './tools/index.js';
 
 const SERVER_VERSION =
@@ -22,39 +26,6 @@ const SERVER_VERSION =
 let shuttingDown = false;
 let activeServer: McpServer | null = null;
 let disableDiagnostics: (() => void) | null = null;
-
-async function closeDbSafely(): Promise<void> {
-  try {
-    await closeDb();
-  } catch (error: unknown) {
-    console.error('Error closing database:', error);
-  }
-}
-
-function disableDiagnosticsSafely(): void {
-  try {
-    disableDiagnostics?.();
-  } catch {
-    // Ignore.
-  } finally {
-    disableDiagnostics = null;
-  }
-}
-
-async function closeServerSafely(signal: NodeJS.Signals): Promise<void> {
-  if (!activeServer) {
-    process.exitCode = 0;
-    return;
-  }
-
-  try {
-    await activeServer.close();
-    process.exitCode = 0;
-  } catch (error: unknown) {
-    console.error(`Shutdown error (${signal}):`, error);
-    process.exitCode = 1;
-  }
-}
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -82,8 +53,8 @@ export async function shutdown(signal: NodeJS.Signals): Promise<void> {
   });
 
   await closeDbSafely();
-  disableDiagnosticsSafely();
-  await closeServerSafely(signal);
+  disableDiagnostics = disableDiagnosticsSafely(disableDiagnostics);
+  await closeServerSafely(activeServer, signal);
 }
 
 export async function startServer(): Promise<void> {

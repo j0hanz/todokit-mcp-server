@@ -51,6 +51,35 @@ function extractOutcome(result: CallToolResult): {
 
 type ToolInput<InputArgs extends AnySchema> = SchemaOutput<InputArgs>;
 
+function publishSuccessResult(
+  tool: string,
+  startedAt: number,
+  resolved: CallToolResult
+): void {
+  const durationMs = Math.max(0, nowMs() - startedAt);
+  const outcome = extractOutcome(resolved);
+  publishToolResult({
+    v: 1,
+    kind: 'tool_result',
+    tool,
+    at: new Date().toISOString(),
+    durationMs,
+    ok: outcome.ok,
+    errorCode: outcome.errorCode,
+  });
+}
+
+function publishFailureResult(tool: string, startedAt: number): void {
+  publishToolResult({
+    v: 1,
+    kind: 'tool_result',
+    tool,
+    at: new Date().toISOString(),
+    durationMs: Math.max(0, nowMs() - startedAt),
+    ok: false,
+  });
+}
+
 function createWrappedHandler<InputArgs extends AnySchema>(
   tool: string,
   handler: ToolCallback<InputArgs>
@@ -64,28 +93,11 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     const result = handler(input, extra);
     return Promise.resolve(result)
       .then((resolved) => {
-        const durationMs = Math.max(0, nowMs() - start);
-        const outcome = extractOutcome(resolved);
-        publishToolResult({
-          v: 1,
-          kind: 'tool_result',
-          tool,
-          at: new Date().toISOString(),
-          durationMs,
-          ok: outcome.ok,
-          errorCode: outcome.errorCode,
-        });
+        publishSuccessResult(tool, start, resolved);
         return resolved;
       })
       .catch((error: unknown) => {
-        publishToolResult({
-          v: 1,
-          kind: 'tool_result',
-          tool,
-          at: new Date().toISOString(),
-          durationMs: Math.max(0, nowMs() - start),
-          ok: false,
-        });
+        publishFailureResult(tool, start);
         throw error;
       });
   };

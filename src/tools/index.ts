@@ -8,12 +8,18 @@ import { registerDeleteTodos } from './delete_todos.js';
 import { registerListTodos } from './list_todos.js';
 import { registerUpdateTodo } from './update_todo.js';
 
+const TOOL_REGISTRATIONS: ((server: McpServer) => void)[] = [
+  registerAddTodo,
+  registerAddTodos,
+  registerListTodos,
+  registerUpdateTodo,
+  registerCompleteTodo,
+  registerDeleteTodo,
+  registerDeleteTodos,
+];
+
 export function registerAllTools(server: McpServer): void {
-  registerAddTodo(server);
-  registerAddTodos(server);
-  registerListTodos(server);
-  registerUpdateTodo(server);
-  registerCompleteTodo(server);
-  registerDeleteTodo(server);
-  registerDeleteTodos(server);
+  TOOL_REGISTRATIONS.forEach((register) => {
+    register(server);
+  });
 }

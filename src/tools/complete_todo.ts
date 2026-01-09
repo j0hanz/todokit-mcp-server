@@ -29,18 +29,20 @@ function buildStatusResponse(todo: Todo, summary: string): CallToolResult {
 }
 
 function buildCompletionSummary(
-  todo: Todo,
-  completed: boolean,
-  already: boolean
+  title: string,
+  already: boolean,
+  targetCompleted: boolean
 ): string {
-  if (already) {
-    return completed
-      ? `Todo "${todo.title}" is already completed`
-      : `Todo "${todo.title}" is already pending`;
+  if (already && targetCompleted) {
+    return `Todo "${title}" is already completed`;
   }
-  return completed
-    ? `Completed todo "${todo.title}"`
-    : `Reopened todo "${todo.title}"`;
+  if (already) {
+    return `Todo "${title}" is already pending`;
+  }
+  if (targetCompleted) {
+    return `Completed todo "${title}"`;
+  }
+  return `Reopened todo "${title}"`;
 }
 
 function buildOutcomeResponse(
@@ -50,14 +52,13 @@ function buildOutcomeResponse(
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }
-  return buildStatusResponse(
-    outcome.todo,
-    buildCompletionSummary(
-      outcome.todo,
-      targetCompleted,
-      outcome.kind === 'already'
-    )
+  const already = outcome.kind === 'already';
+  const summary = buildCompletionSummary(
+    outcome.todo.title,
+    already,
+    targetCompleted
   );
+  return buildStatusResponse(outcome.todo, summary);
 }
 
 async function handleCompleteTodo(

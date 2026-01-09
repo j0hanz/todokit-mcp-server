@@ -5,9 +5,9 @@ import type { z } from 'zod';
 
 import { createErrorResponse, getErrorMessage } from '../lib/errors.js';
 import { addTodos } from '../lib/storage.js';
-import { createToolResponse } from '../lib/tool_response.js';
 import { AddTodoSchema } from '../schemas/inputs.js';
 import { DefaultOutputSchema } from '../schemas/outputs.js';
+import { buildAddTodoResponse, requireSingleTodo } from './add_todo_helpers.js';
 import { registerToolWithDiagnostics } from './register_tool.js';
 
 type AddTodoInput = z.infer<typeof AddTodoSchema>;
@@ -26,20 +26,10 @@ const addTodoToolConfig = {
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
   const { title, description, priority, dueDate, tags } = input;
   try {
-    const [todo] = await addTodos([
+    const todos = await addTodos([
       { title, description, priority, dueDate, tags },
     ]);
-    if (!todo) {
-      throw new Error('Failed to create todo');
-    }
-    return createToolResponse({
-      ok: true,
-      result: {
-        item: todo,
-        summary: `Added todo "${todo.title}"`,
-        nextActions: ['list_todos', 'update_todo', 'complete_todo'],
-      },
-    });
+    return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     return createErrorResponse('E_ADD_TODO', getErrorMessage(err));
   }
