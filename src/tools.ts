@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
   McpServer,
   ToolCallback,
@@ -16,7 +18,11 @@ import type {
 
 import { z } from 'zod';
 
-import { nowMs, publishToolCall, publishToolResult } from './diagnostics.js';
+import {
+  nowMs,
+  publishToolCallWithId,
+  publishToolResult,
+} from './diagnostics.js';
 import {
   createErrorResponse,
   createToolResponse,
@@ -84,6 +90,7 @@ type ToolInput<InputArgs extends AnySchema> = SchemaOutput<InputArgs>;
 
 function publishSuccessResult(
   tool: string,
+  requestId: string,
   startedAt: number,
   resolved: CallToolResult
 ): void {
@@ -93,6 +100,7 @@ function publishSuccessResult(
     v: 1,
     kind: 'tool_result',
     tool,
+    requestId,
     at: new Date().toISOString(),
     durationMs,
     ok: outcome.ok,
@@ -100,11 +108,16 @@ function publishSuccessResult(
   });
 }
 
-function publishFailureResult(tool: string, startedAt: number): void {
+function publishFailureResult(
+  tool: string,
+  requestId: string,
+  startedAt: number
+): void {
   publishToolResult({
     v: 1,
     kind: 'tool_result',
     tool,
+    requestId,
     at: new Date().toISOString(),
     durationMs: Math.max(0, nowMs() - startedAt),
     ok: false,
@@ -119,16 +132,17 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     input: ToolInput<InputArgs>,
     extra: RequestHandlerExtra<ServerRequest, ServerNotification>
   ): Promise<CallToolResult> => {
-    publishToolCall(tool, input);
+    const requestId = randomUUID();
+    publishToolCallWithId(tool, input, requestId);
     const start = nowMs();
     const result = handler(input, extra);
     return Promise.resolve(result)
       .then((resolved) => {
-        publishSuccessResult(tool, start, resolved);
+        publishSuccessResult(tool, requestId, start, resolved);
         return resolved;
       })
       .catch((error: unknown) => {
-        publishFailureResult(tool, start);
+        publishFailureResult(tool, requestId, start);
         throw error;
       });
   };

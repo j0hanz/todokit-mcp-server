@@ -32,6 +32,12 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -72,16 +78,20 @@ export async function getFileMtime(
 
 export async function readFileIfExists(
   path: string,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<string | null> {
   try {
     return await readFile(path, {
       encoding: 'utf8',
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ?? AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     if (isNotFoundError(error)) return null;
-    if (isAbortError(error)) throw new Error('File read timed out');
+    if (isAbortError(error)) {
+      if (signal) throw error;
+      throw createAbortError('File read timed out');
+    }
     throw error;
   }
 }

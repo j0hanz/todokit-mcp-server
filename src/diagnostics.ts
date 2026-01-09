@@ -10,6 +10,7 @@ export interface ToolCallEvent {
   v: 1;
   kind: 'tool_call';
   tool: string;
+  requestId?: string | undefined;
   at: string;
   input: { type: string; keys?: string[]; size?: number };
 }
@@ -18,6 +19,7 @@ export interface ToolResultEvent {
   v: 1;
   kind: 'tool_result';
   tool: string;
+  requestId?: string | undefined;
   at: string;
   durationMs: number;
   ok: boolean;
@@ -80,6 +82,22 @@ export function publishToolCall(tool: string, input: unknown): void {
     v: 1,
     kind: 'tool_call',
     tool,
+    at: new Date().toISOString(),
+    input: summarizeInput(input),
+  };
+  safePublish(toolDiagnosticsChannel, event);
+}
+
+export function publishToolCallWithId(
+  tool: string,
+  input: unknown,
+  requestId: string
+): void {
+  const event: ToolCallEvent = {
+    v: 1,
+    kind: 'tool_call',
+    tool,
+    requestId,
     at: new Date().toISOString(),
     input: summarizeInput(input),
   };

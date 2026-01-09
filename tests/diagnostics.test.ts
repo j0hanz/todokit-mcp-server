@@ -68,19 +68,30 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
       const addResult = await addHandler({ title: 'Diag Task' });
       assert.equal((addResult as StructuredResult).structuredContent?.ok, true);
 
-      assert.ok(
-        toolEvents.some((event) => {
-          if (!isRecord(event)) return false;
-          return event.kind === 'tool_call' && event.tool === 'add_todo';
-        })
-      );
+      const callEvent = toolEvents.find((event) => {
+        if (!isRecord(event)) return false;
+        return event.kind === 'tool_call' && event.tool === 'add_todo';
+      });
+      assert.ok(callEvent);
+      assert.equal(isRecord(callEvent) && typeof callEvent.requestId, 'string');
 
-      assert.ok(
-        toolEvents.some((event) => {
-          if (!isRecord(event)) return false;
-          return event.kind === 'tool_result' && event.tool === 'add_todo';
-        })
-      );
+      const resultEvent = toolEvents.find((event) => {
+        if (!isRecord(event)) return false;
+        return event.kind === 'tool_result' && event.tool === 'add_todo';
+      });
+      assert.ok(resultEvent);
+
+      const callId =
+        isRecord(callEvent) && typeof callEvent.requestId === 'string'
+          ? callEvent.requestId
+          : null;
+      const resultId =
+        isRecord(resultEvent) && typeof resultEvent.requestId === 'string'
+          ? resultEvent.requestId
+          : null;
+
+      assert.equal(callId !== null, true);
+      assert.equal(resultId, callId);
 
       assert.ok(
         storageEvents.some((event) => {
@@ -122,6 +133,16 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
           if (!isRecord(event)) return false;
           return event.kind === 'tool_result' && event.tool === 'fail_tool';
         })
+      );
+
+      const resultEvent = toolEvents.find((event) => {
+        if (!isRecord(event)) return false;
+        return event.kind === 'tool_result' && event.tool === 'fail_tool';
+      });
+      assert.ok(resultEvent);
+      assert.equal(
+        isRecord(resultEvent) && typeof resultEvent.requestId,
+        'string'
       );
     } finally {
       unsubscribe('todokit:tool', onTool);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 import {
@@ -6,6 +7,7 @@ import {
   deleteTodoBySelector,
   getTodos,
   normalizeTags,
+  readFileIfExists,
   updateTodoBySelector,
 } from '../src/storage.js';
 import './setup.js';
@@ -124,5 +126,38 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     await Promise.all(titles.map((title) => addTodos([{ title }])));
     const todos = await getTodos();
     assert.equal(todos.length, count);
+  });
+
+  it('preserves AbortError semantics for aborted reads', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    await writeFile(todoFile, 'hello', { encoding: 'utf8' });
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      () => readFileIfExists(todoFile, 10_000, controller.signal),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.name === 'AbortError' &&
+        !String(error.message).includes('File read timed out')
+    );
+  });
+
+  it('maps internal timeouts to AbortError', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const payload = 'a'.repeat(10_000_000);
+    await writeFile(todoFile, payload, { encoding: 'utf8' });
+
+    await assert.rejects(
+      () => readFileIfExists(todoFile, 0),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.name === 'AbortError' &&
+        String(error.message).includes('File read timed out')
+    );
   });
 });
