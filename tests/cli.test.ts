@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseCliArgs } from '../src/lib/cli.js';
+import { parseCliArgs } from '../src/index.js';
 
 const TEST_TIMEOUT_MS = 5000;
 

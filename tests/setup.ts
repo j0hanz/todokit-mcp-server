@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach } from 'node:test';
 
-import { closeDb } from '../src/lib/db.js';
+import { closeDb } from '../src/storage.js';
 
 let tempDir = '';
 

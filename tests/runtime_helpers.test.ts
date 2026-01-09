@@ -7,7 +7,7 @@ import {
   closeDbSafely,
   closeServerSafely,
   disableDiagnosticsSafely,
-} from '../src/lib/runtime_helpers.js';
+} from '../src/index.js';
 
 describe('runtime helpers', () => {
   it('closes database safely without throwing', async () => {

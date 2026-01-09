@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { TodosSchema } from '../src/lib/types.js';
 import {
   AddTodoSchema,
   DeleteTodoSchema,
+  IsoDateSchema,
+  IsoDateTimeSchema,
+  TodosSchema,
   UpdateTodoSchema,
-} from '../src/schemas/inputs.js';
-import { IsoDateSchema, IsoDateTimeSchema } from '../src/schemas/iso_date.js';
+} from '../src/schema.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;

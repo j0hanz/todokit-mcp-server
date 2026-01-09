@@ -1,3 +1,5 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
 export interface ErrorResponse {
   [key: string]: unknown;
   content: { type: 'text'; text: string }[];
@@ -46,5 +48,20 @@ export function createErrorResponse(
     content: [{ type: 'text', text: JSON.stringify(structured) }],
     structuredContent: structured,
     isError: true,
+  };
+}
+
+interface ToolResponse<
+  T extends Record<string, unknown>,
+> extends CallToolResult {
+  structuredContent: T;
+}
+
+export function createToolResponse<T extends Record<string, unknown>>(
+  structuredContent: T
+): ToolResponse<T> {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+    structuredContent,
   };
 }

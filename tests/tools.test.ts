@@ -4,19 +4,17 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { addTodos, getTodos, updateTodoBySelector } from '../src/storage.js';
 import {
-  addTodos,
-  getTodos,
-  updateTodoBySelector,
-} from '../src/lib/storage.js';
-import { registerAddTodo } from '../src/tools/add_todo.js';
-import { registerAddTodos } from '../src/tools/add_todos.js';
-import { registerCompleteTodo } from '../src/tools/complete_todo.js';
-import { registerDeleteTodo } from '../src/tools/delete_todo.js';
-import { registerDeleteTodos } from '../src/tools/delete_todos.js';
-import { registerAllTools } from '../src/tools/index.js';
-import { registerListTodos } from '../src/tools/list_todos.js';
-import { registerUpdateTodo } from '../src/tools/update_todo.js';
+  registerAddTodo,
+  registerAddTodos,
+  registerAllTools,
+  registerCompleteTodo,
+  registerDeleteTodo,
+  registerDeleteTodos,
+  registerListTodos,
+  registerUpdateTodo,
+} from '../src/tools.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;

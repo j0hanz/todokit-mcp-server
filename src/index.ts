@@ -1,22 +1,128 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import packageJson from '../package.json' with { type: 'json' };
-import { parseCliArgs } from './lib/cli.js';
 import {
   enableDefaultDiagnosticsSubscribers,
   publishLifecycleEvent,
-} from './lib/diagnostics.js';
-import { createStderrLogger } from './lib/log.js';
-import {
-  closeDbSafely,
-  closeServerSafely,
-  disableDiagnosticsSafely,
-} from './lib/runtime_helpers.js';
-import { registerAllTools } from './tools/index.js';
+} from './diagnostics.js';
+import { closeDb } from './storage.js';
+import { registerAllTools } from './tools.js';
+
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+
+export interface Logger {
+  debug(message: string): void;
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+const LEVEL_RANKS = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+} as const;
+
+function levelRank(level: LogLevel): number {
+  return LEVEL_RANKS[level];
+}
+
+function shouldLog(current: LogLevel, target: LogLevel): boolean {
+  return levelRank(target) >= levelRank(current);
+}
+
+function createStderrLogger(level: LogLevel): Logger {
+  return {
+    debug(message: string): void {
+      if (!shouldLog(level, 'debug')) return;
+      console.error(message);
+    },
+    info(message: string): void {
+      if (!shouldLog(level, 'info')) return;
+      console.error(message);
+    },
+    warn(message: string): void {
+      if (!shouldLog(level, 'warn')) return;
+      console.error(message);
+    },
+    error(message: string): void {
+      if (!shouldLog(level, 'error')) return;
+      console.error(message);
+    },
+  };
+}
+
+export interface CliOptions {
+  todoFile?: string | undefined;
+  diagnostics: boolean;
+  logLevel: LogLevel;
+}
+
+type ParsedValues = Record<string, unknown> & {
+  diagnostics?: boolean | undefined;
+  'log-level'?: string | undefined;
+};
+
+const DEFAULT_CLI_OPTIONS: CliOptions = {
+  todoFile: undefined,
+  diagnostics: false,
+  logLevel: 'info',
+};
+
+function isLogLevel(value: unknown): value is LogLevel {
+  return (
+    value === 'error' ||
+    value === 'warn' ||
+    value === 'info' ||
+    value === 'debug'
+  );
+}
+
+function createDefaults(): CliOptions {
+  return { ...DEFAULT_CLI_OPTIONS };
+}
+
+function resolveTodoFile(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function resolveLogLevel(value: unknown): LogLevel {
+  return isLogLevel(value) ? value : DEFAULT_CLI_OPTIONS.logLevel;
+}
+
+export function parseCliArgs(argv: readonly string[]): CliOptions {
+  try {
+    const args = argv.slice(2);
+    const parsed = parseArgs({
+      args,
+      strict: false,
+      allowPositionals: true,
+      options: {
+        'todo-file': { type: 'string', short: 'f' },
+        diagnostics: { type: 'boolean', short: 'd' },
+        'log-level': { type: 'string', short: 'l' },
+      },
+    });
+
+    const values = parsed.values as ParsedValues;
+    const todoFile = resolveTodoFile(values['todo-file']);
+    const logLevel = resolveLogLevel(values['log-level']);
+
+    return {
+      todoFile,
+      diagnostics: values.diagnostics === true,
+      logLevel,
+    };
+  } catch {
+    return createDefaults();
+  }
+}
 
 const SERVER_VERSION =
   typeof packageJson.version === 'string' && packageJson.version.length > 0
@@ -38,6 +144,41 @@ export function createServer(): McpServer {
 
   registerAllTools(server);
   return server;
+}
+
+export async function closeDbSafely(): Promise<void> {
+  try {
+    await closeDb();
+  } catch (error: unknown) {
+    console.error('Error closing database:', error);
+  }
+}
+
+export function disableDiagnosticsSafely(disposer: (() => void) | null): null {
+  try {
+    disposer?.();
+  } catch {
+    // Ignore.
+  }
+  return null;
+}
+
+export async function closeServerSafely(
+  server: McpServer | null,
+  signal: NodeJS.Signals
+): Promise<void> {
+  if (!server) {
+    process.exitCode = 0;
+    return;
+  }
+
+  try {
+    await server.close();
+    process.exitCode = 0;
+  } catch (error: unknown) {
+    console.error(`Shutdown error (${signal}):`, error);
+    process.exitCode = 1;
+  }
 }
 
 export async function shutdown(signal: NodeJS.Signals): Promise<void> {

@@ -7,8 +7,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { z } from 'zod';
 
-import { registerAllTools } from '../src/tools/index.js';
-import { registerToolWithDiagnostics } from '../src/tools/register_tool.js';
+import { registerAllTools, registerToolWithDiagnostics } from '../src/tools.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;

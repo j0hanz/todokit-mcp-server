@@ -7,7 +7,7 @@ import {
   getTodos,
   normalizeTags,
   updateTodoBySelector,
-} from '../src/lib/storage.js';
+} from '../src/storage.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;

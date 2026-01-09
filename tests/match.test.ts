@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  addTodos,
+  getTodos,
   type ResolveTodoInput,
   resolveTodoTargetFromTodos,
   toResolveInput,
-} from '../src/lib/resolve.js';
-import { addTodos, getTodos } from '../src/lib/storage.js';
+} from '../src/storage.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;

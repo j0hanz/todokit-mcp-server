@@ -8,7 +8,79 @@ import {
   type ZodType,
 } from 'zod';
 
-import { IsoDateSchema } from './iso_date.js';
+const ISO_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+interface IsoDateParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
+function parseIsoDateParts(value: string): IsoDateParts | null {
+  const match = ISO_DATE_REGEX.exec(value);
+  if (!match) return null;
+  const [, yearPart, monthPart, dayPart] = match;
+  return {
+    year: Number(yearPart),
+    month: Number(monthPart),
+    day: Number(dayPart),
+  };
+}
+
+function isMatchingUtcDate({ year, month, day }: IsoDateParts): boolean {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const actual = [
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+  ];
+  const expected = [year, month, day];
+  return expected.every((value, index) => value === actual[index]);
+}
+
+function isValidIsoDate(value: string): boolean {
+  const parts = parseIsoDateParts(value);
+  if (!parts) return false;
+  return isMatchingUtcDate(parts);
+}
+
+export const IsoDateSchema: ZodType<string> = z
+  .string()
+  .refine((value) => isValidIsoDate(value), {
+    error: 'Invalid date (YYYY-MM-DD)',
+  });
+
+export const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
+  offset: true,
+});
+
+export interface Todo {
+  id: string;
+  title: string;
+  description?: string | undefined;
+  completed: boolean;
+  priority: 'low' | 'normal' | 'high';
+  dueDate?: string | undefined;
+  tags: string[];
+  createdAt: string;
+  updatedAt?: string | undefined;
+  completedAt?: string | undefined;
+}
+
+const TodoSchema: ZodType<Todo> = z.strictObject({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  completed: z.boolean(),
+  priority: z.enum(['low', 'normal', 'high']).default('normal'),
+  dueDate: IsoDateSchema.optional(),
+  tags: z.array(z.string()).default([]),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema.optional(),
+  completedAt: IsoDateTimeSchema.optional(),
+});
+
+export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
 
 type Priority = 'low' | 'normal' | 'high';
 type Status = 'pending' | 'completed' | 'all';
@@ -264,3 +336,15 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       .optional()
       .describe('Number of results to skip'),
   });
+
+interface DefaultOutput {
+  ok: boolean;
+  result?: unknown;
+  error?: { code: string; message: string } | undefined;
+}
+
+export const DefaultOutputSchema: ZodType<DefaultOutput> = z.strictObject({
+  ok: z.boolean(),
+  result: z.unknown().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).optional(),
+});
