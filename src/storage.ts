@@ -211,35 +211,41 @@ async function saveTodos(path: string, todos: Todo[]): Promise<void> {
   });
 }
 
-export async function readTodos(): Promise<readonly Todo[]> {
-  const start = nowMs();
-  await writeQueue;
-  const path = getTodoFilePath();
-  const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
-  if (cache?.mtimeMs === mtimeMs) {
-    publishStorageEvent({
-      v: 1,
-      kind: 'storage',
-      op: 'read',
-      at: new Date().toISOString(),
-      durationMs: Math.max(0, nowMs() - start),
-      cacheHit: true,
-      todoCount: cache.todos.length,
-    });
-    return cache.todos;
-  }
-  const todos = await loadTodos(path);
-  cache = { todos, mtimeMs };
+function getCachedTodos(mtimeMs: number | null): Todo[] | null {
+  if (cache?.mtimeMs !== mtimeMs) return null;
+  return cache.todos;
+}
 
+function publishReadEvent(
+  start: number,
+  cacheHit: boolean,
+  todoCount: number
+): void {
   publishStorageEvent({
     v: 1,
     kind: 'storage',
     op: 'read',
     at: new Date().toISOString(),
     durationMs: Math.max(0, nowMs() - start),
-    cacheHit: false,
-    todoCount: todos.length,
+    cacheHit,
+    todoCount,
   });
+}
+
+export async function readTodos(): Promise<readonly Todo[]> {
+  const start = nowMs();
+  await writeQueue;
+  const path = getTodoFilePath();
+  const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
+  const cached = getCachedTodos(mtimeMs);
+  if (cached) {
+    publishReadEvent(start, true, cached.length);
+    return cached;
+  }
+  const todos = await loadTodos(path);
+  cache = { todos, mtimeMs };
+
+  publishReadEvent(start, false, todos.length);
   return todos;
 }
 

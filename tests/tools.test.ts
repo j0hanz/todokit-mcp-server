@@ -128,6 +128,33 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     }
   });
 
+  it('lists todos with limit using priority sort', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerListTodos(server);
+
+    await addTodos([
+      { title: 'Low', priority: 'low' },
+      { title: 'High', priority: 'high' },
+      { title: 'Normal', priority: 'normal' },
+    ]);
+
+    const listHandler = getHandler<{
+      sortBy: string;
+      order: string;
+      limit: number;
+    }>('list_todos');
+    const result = await listHandler({
+      sortBy: 'priority',
+      order: 'desc',
+      limit: 2,
+    });
+    const structured = getStructured(result)?.result as Record<string, unknown>;
+    const titles = (structured.items as { title: string }[]).map(
+      (item) => item.title
+    );
+    assert.deepEqual(titles, ['High', 'Normal']);
+  });
+
   it('lists empty results with summary', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
