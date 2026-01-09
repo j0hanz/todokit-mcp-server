@@ -248,11 +248,10 @@ export async function withTodos<T>(
 ): Promise<T> {
   return enqueueWrite(async () => {
     const path = getTodoFilePath();
-    const current = await loadTodos(path);
-    cache = {
-      todos: current,
-      mtimeMs: await getFileMtime(path, IO_TIMEOUT_MS),
-    };
+    const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
+    const current =
+      cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
+    cache = { todos: current, mtimeMs };
     const { todos, result } = mutate(current);
     if (todos !== current) {
       await saveTodos(path, todos);

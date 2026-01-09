@@ -332,19 +332,115 @@ const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
   createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
 };
 
+function createTodoComparator(
+  sortBy: SortBy,
+  order: SortOrder
+): (a: Todo, b: Todo) => number {
+  const direction = order === 'desc' ? -1 : 1;
+  const comparator = COMPARATORS[sortBy];
+  return (a, b) => {
+    const diff = comparator(a, b);
+    if (diff !== 0) return diff * direction;
+    return a.createdAt.localeCompare(b.createdAt);
+  };
+}
+
 function sortTodos(
   todos: readonly Todo[],
   sortBy: SortBy,
   order: SortOrder
 ): Todo[] {
-  const direction = order === 'desc' ? -1 : 1;
-  const comparator = COMPARATORS[sortBy];
+  const comparator = createTodoComparator(sortBy, order);
+  return todos.toSorted(comparator);
+}
 
-  return todos.toSorted((a, b) => {
-    const diff = comparator(a, b);
-    if (diff !== 0) return diff * direction;
-    return a.createdAt.localeCompare(b.createdAt);
-  });
+interface IndexedTodo {
+  todo: Todo;
+  index: number;
+}
+
+function createIndexedComparator(
+  comparator: (a: Todo, b: Todo) => number
+): (a: IndexedTodo, b: IndexedTodo) => number {
+  return (left, right) => {
+    const diff = comparator(left.todo, right.todo);
+    if (diff !== 0) return diff;
+    return left.index - right.index;
+  };
+}
+
+function selectTopKSorted(
+  todos: readonly Todo[],
+  k: number,
+  comparator: (a: Todo, b: Todo) => number
+): Todo[] {
+  if (k <= 0) return [];
+  if (k >= todos.length) return todos.toSorted(comparator);
+
+  const indexedComparator = createIndexedComparator(comparator);
+  const heap: IndexedTodo[] = [];
+  const getHeapItem = (index: number): IndexedTodo => {
+    const item = heap[index];
+    if (!item) {
+      throw new Error('Heap index out of range');
+    }
+    return item;
+  };
+  const isWorse = (a: IndexedTodo, b: IndexedTodo): boolean =>
+    indexedComparator(a, b) > 0;
+  const swap = (i: number, j: number): void => {
+    const temp = getHeapItem(i);
+    heap[i] = getHeapItem(j);
+    heap[j] = temp;
+  };
+  const siftUp = (index: number): void => {
+    let i = index;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!isWorse(getHeapItem(i), getHeapItem(parent))) break;
+      swap(i, parent);
+      i = parent;
+    }
+  };
+  const siftDown = (index: number): void => {
+    let i = index;
+    for (;;) {
+      const left = i * 2 + 1;
+      if (left >= heap.length) break;
+      const right = left + 1;
+      let worst = left;
+      if (
+        right < heap.length &&
+        isWorse(getHeapItem(right), getHeapItem(left))
+      ) {
+        worst = right;
+      }
+      if (!isWorse(getHeapItem(worst), getHeapItem(i))) break;
+      swap(i, worst);
+      i = worst;
+    }
+  };
+  const push = (item: IndexedTodo): void => {
+    heap.push(item);
+    siftUp(heap.length - 1);
+  };
+
+  for (let index = 0; index < todos.length; index += 1) {
+    const todo = todos[index];
+    if (!todo) continue;
+    const item: IndexedTodo = { todo, index };
+    if (heap.length < k) {
+      push(item);
+      continue;
+    }
+    const root = heap[0];
+    if (root && indexedComparator(item, root) < 0) {
+      heap[0] = item;
+      siftDown(0);
+    }
+  }
+
+  return heap.toSorted(indexedComparator).map((item) => item.todo);
 }
 
 function resolveCompletedFilter(
@@ -484,13 +580,17 @@ async function handleListTodos(
 
   const todayIso = getTodayIso();
   const counts = computeCounts(allTodos, todayIso);
-  const sorted: readonly Todo[] = canReuseOrder(
-    normalized.sortBy,
-    normalized.order,
-    counts
-  )
-    ? allTodos
-    : sortTodos(allTodos, normalized.sortBy, normalized.order);
+  const comparator = createTodoComparator(normalized.sortBy, normalized.order);
+  const pageSize = normalized.offset + normalized.limit;
+  const needsPartial = pageSize < allTodos.length;
+  let sorted: readonly Todo[];
+  if (canReuseOrder(normalized.sortBy, normalized.order, counts)) {
+    sorted = allTodos;
+  } else if (needsPartial) {
+    sorted = selectTopKSorted(allTodos, pageSize, comparator);
+  } else {
+    sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
+  }
   const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
   return buildListResponse(paged, counts, normalized);
 }

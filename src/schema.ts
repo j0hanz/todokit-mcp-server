@@ -337,14 +337,21 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       .describe('Number of results to skip'),
   });
 
-interface DefaultOutput {
-  ok: boolean;
-  result?: unknown;
-  error?: { code: string; message: string } | undefined;
-}
+type DefaultOutput =
+  | { ok: true; result?: unknown }
+  | { ok: false; error: { code: string; message: string }; result?: unknown };
 
-export const DefaultOutputSchema: ZodType<DefaultOutput> = z.strictObject({
-  ok: z.boolean(),
+const DefaultOkSchema = z.strictObject({
+  ok: z.literal(true),
   result: z.unknown().optional(),
-  error: z.object({ code: z.string(), message: z.string() }).optional(),
 });
+const DefaultErrorSchema = z.strictObject({
+  ok: z.literal(false),
+  error: z.object({ code: z.string(), message: z.string() }),
+  result: z.unknown().optional(),
+});
+
+export const DefaultOutputSchema: ZodType<DefaultOutput> = z.discriminatedUnion(
+  'ok',
+  [DefaultOkSchema, DefaultErrorSchema]
+);

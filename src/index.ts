@@ -4,6 +4,15 @@ import { parseArgs } from 'node:util';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  type CallToolResult,
+  ErrorCode,
+  type InitializeRequest,
+  InitializeRequestSchema,
+  type InitializeResult,
+  McpError,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 import {
@@ -133,6 +142,58 @@ let shuttingDown = false;
 let activeServer: McpServer | null = null;
 let disableDiagnostics: (() => void) | null = null;
 
+type InitializeHandler = (
+  request: InitializeRequest
+) => InitializeResult | Promise<InitializeResult>;
+
+function mapToolErrorCode(message: string): string {
+  if (message.startsWith('Input validation error')) return 'E_INVALID_PARAMS';
+  if (message.includes('not found')) return 'E_TOOL_NOT_FOUND';
+  if (message.includes('disabled')) return 'E_TOOL_DISABLED';
+  if (message.startsWith('Output validation error')) return 'E_OUTPUT_INVALID';
+  return 'E_TOOL_ERROR';
+}
+
+function patchToolErrorResponses(server: McpServer): void {
+  const target = server as unknown as {
+    createToolError?: (message: string) => CallToolResult;
+  };
+  target.createToolError = (message: string): CallToolResult => {
+    const structured = {
+      ok: false,
+      error: { code: mapToolErrorCode(message), message },
+    };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(structured) }],
+      structuredContent: structured,
+      isError: true,
+    };
+  };
+}
+
+function enforceProtocolVersion(server: McpServer): void {
+  const internalServer = server.server as unknown as {
+    _oninitialize?: InitializeHandler;
+    setRequestHandler: typeof server.server.setRequestHandler;
+  };
+  const onInitialize = internalServer._oninitialize;
+  if (!onInitialize) return;
+  const boundOnInitialize = onInitialize.bind(server.server);
+  internalServer.setRequestHandler(
+    InitializeRequestSchema,
+    (request: InitializeRequest) => {
+      const requested = request.params.protocolVersion;
+      if (!SUPPORTED_PROTOCOL_VERSIONS.includes(requested)) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Unsupported protocol version: ${requested}`
+        );
+      }
+      return boundOnInitialize(request);
+    }
+  );
+}
+
 export function createServer(): McpServer {
   const server = new McpServer(
     { name: 'todokit', version: SERVER_VERSION },
@@ -142,6 +203,8 @@ export function createServer(): McpServer {
     }
   );
 
+  enforceProtocolVersion(server);
+  patchToolErrorResponses(server);
   registerAllTools(server);
   return server;
 }
