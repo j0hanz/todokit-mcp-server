@@ -9,9 +9,9 @@ import {
   registerAddTodo,
   registerAddTodos,
   registerAllTools,
+  registerClearTodos,
   registerCompleteTodo,
   registerDeleteTodo,
-  registerDeleteTodos,
   registerListTodos,
   registerUpdateTodo,
 } from '../src/tools.js';
@@ -64,7 +64,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       'update_todo',
       'complete_todo',
       'delete_todo',
-      'delete_todos',
+      'clear_todos',
     ];
     names.forEach((name) => {
       assert.doesNotThrow(() => getHandler(name));
@@ -280,7 +280,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('deletes all todos', async () => {
     const { server, getHandler } = createToolHarness();
-    registerDeleteTodos(server);
+    registerClearTodos(server);
 
     await addTodos([
       { description: 'Item one' },
@@ -288,7 +288,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       { description: 'Item three' },
     ]);
 
-    const deleteHandler = getHandler<Record<string, never>>('delete_todos');
+    const deleteHandler = getHandler<Record<string, never>>('clear_todos');
     const result = await deleteHandler({});
     const structured = getStructured(result)?.result as Record<string, unknown>;
 

@@ -519,12 +519,12 @@ async function handleDeleteTodos(): Promise<CallToolResult> {
   });
 }
 
-export function registerDeleteTodos(server: McpServer): void {
+export function registerClearTodos(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
-    'delete_todos',
+    'clear_todos',
     {
-      title: 'Delete All Todos',
+      title: 'Clear All Todos',
       description: 'Delete all todos from the list',
       inputSchema: z.object({}),
       outputSchema: DefaultOutputSchema,
@@ -538,7 +538,7 @@ export function registerDeleteTodos(server: McpServer): void {
       try {
         return await handleDeleteTodos();
       } catch (err) {
-        return createErrorResponse('E_DELETE_TODOS', getErrorMessage(err));
+        return createErrorResponse('E_CLEAR_TODOS', getErrorMessage(err));
       }
     }
   );
@@ -551,7 +551,7 @@ const TOOL_REGISTRATIONS: ((server: McpServer) => void)[] = [
   registerUpdateTodo,
   registerCompleteTodo,
   registerDeleteTodo,
-  registerDeleteTodos,
+  registerClearTodos,
 ];
 
 export function registerAllTools(server: McpServer): void {

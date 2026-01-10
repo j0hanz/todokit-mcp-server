@@ -227,7 +227,7 @@ Result fields:
 - `summary`
 - `nextActions`
 
-### delete_todos
+### clear_todos
 
 Delete all todos from the list.
 
