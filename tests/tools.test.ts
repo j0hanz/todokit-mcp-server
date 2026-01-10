@@ -121,7 +121,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.deepEqual(descriptions, ['Alpha task', 'Beta task']);
   });
 
-  it('lists todos with limit using createdAt sort', async () => {
+  it('lists all todos when no filter specified', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
 
@@ -134,21 +134,18 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.ok(second);
     assert.ok(third);
 
-    const listHandler = getHandler<{
-      sortBy: string;
-      order: string;
-      limit: number;
-    }>('list_todos');
-    const result = await listHandler({
-      sortBy: 'createdAt',
-      order: 'asc',
-      limit: 2,
-    });
+    const listHandler = getHandler<Record<string, never>>('list_todos');
+    const result = await listHandler({});
     const structured = getStructured(result)?.result as Record<string, unknown>;
     const descriptions = (structured.items as { description: string }[]).map(
       (item) => item.description
     );
-    assert.deepEqual(descriptions, ['First task', 'Second task']);
+    assert.equal(descriptions.length, 3);
+    assert.deepEqual(structured.counts, {
+      total: 3,
+      pending: 3,
+      completed: 0,
+    });
   });
 
   it('lists empty results with summary', async () => {
@@ -250,15 +247,13 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(structured?.error?.code, 'E_BAD_REQUEST');
   });
 
-  it('completes, reopens, and handles already state', async () => {
+  it('completes todo and handles already completed state', async () => {
     const { server, getHandler } = createToolHarness();
     registerCompleteTodo(server);
 
     const [todo] = await addTodos([{ description: 'Finish this task' }]);
     assert.ok(todo);
-    const completeHandler = getHandler<{ id: string; completed?: boolean }>(
-      'complete_todo'
-    );
+    const completeHandler = getHandler<{ id: string }>('complete_todo');
 
     const completeResult = await completeHandler({ id: todo.id });
     assert.equal(getStructured(completeResult)?.ok, true);
@@ -281,12 +276,6 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     };
     assert.equal(alreadyItem.updatedAt, completeItem.updatedAt);
     assert.match(String(alreadyStructured.summary ?? ''), /already completed/i);
-
-    const reopenResult = await completeHandler({
-      id: todo.id,
-      completed: false,
-    });
-    assert.equal(getStructured(reopenResult)?.ok, true);
   });
 
   it('deletes todos in bulk with filters', async () => {
@@ -328,49 +317,40 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     );
   });
 
-  it('supports delete dry-run on ambiguous matches', async () => {
+  it('delete_todo requires exact id', async () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
 
-    await addTodos([
-      { description: 'Shared item one' },
-      { description: 'Shared item two' },
+    const [todo1, todo2] = await addTodos([
+      { description: 'Item one' },
+      { description: 'Item two' },
     ]);
+    assert.ok(todo1);
+    assert.ok(todo2);
 
-    const deleteHandler = getHandler<{ query: string; dryRun: boolean }>(
-      'delete_todo'
-    );
-    const result = await deleteHandler({ query: 'Shared', dryRun: true });
+    const deleteHandler = getHandler<{ id: string }>('delete_todo');
 
+    // Delete by exact id works
+    const result = await deleteHandler({ id: todo1.id });
     const structured = getStructured(result);
     assert.equal(structured?.ok, true);
-    assert.equal(structured?.result?.dryRun, true);
+
+    // Check only one item remains
+    const remaining = await getTodos();
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0]?.id, todo2.id);
   });
 
-  it('handles delete dry-run for single match and ambiguous errors', async () => {
+  it('delete_todo returns error for non-existent id', async () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
 
-    const [todo] = await addTodos([
-      { description: 'Unique delete item' },
-      { description: 'Batch delete one' },
-      { description: 'Batch delete two' },
-    ]);
-    assert.ok(todo);
+    await addTodos([{ description: 'Some item' }]);
 
-    const deleteHandler = getHandler<{
-      id?: string;
-      query?: string;
-      dryRun?: boolean;
-    }>('delete_todo');
+    const deleteHandler = getHandler<{ id: string }>('delete_todo');
+    const result = await deleteHandler({ id: 'non-existent-id' });
 
-    const dryRunResult = await deleteHandler({ id: todo.id, dryRun: true });
-    assert.equal(getStructured(dryRunResult)?.result?.dryRun, true);
-
-    const ambiguousResult = await deleteHandler({
-      query: 'Batch',
-      dryRun: false,
-    });
-    assert.equal(getStructured(ambiguousResult)?.ok, false);
+    const structured = getStructured(result);
+    assert.equal(structured?.ok, false);
   });
 });

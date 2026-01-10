@@ -46,10 +46,8 @@ import {
   deleteTodoBySelector,
   deleteTodosByIds,
   getTodos,
-  resolveTodoTargetFromTodos,
   type TodoUpdate,
   toResolveInput,
-  unwrapResolution,
   updateTodoBySelector,
 } from './storage.js';
 
@@ -257,275 +255,51 @@ export function registerAddTodos(server: McpServer): void {
 }
 
 type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
-type SortBy = 'createdAt';
-type SortOrder = 'asc' | 'desc';
-
-interface NormalizedFilters {
-  completed?: boolean | undefined;
-  query?: string | undefined;
-  sortBy: SortBy;
-  order: SortOrder;
-  limit: number;
-  offset: number;
-}
 
 interface CountSummary {
   total: number;
   completed: number;
   pending: number;
-  isCreatedAtAsc: boolean;
-  isCreatedAtDesc: boolean;
-}
-
-interface OrderState {
-  previousCreatedAt: string | null;
-  isCreatedAtAsc: boolean;
-  isCreatedAtDesc: boolean;
-}
-
-const DEFAULT_LIMIT = 50;
-const DEFAULT_OFFSET = 0;
-
-const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
-  createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
-};
-
-function createTodoComparator(
-  sortBy: SortBy,
-  order: SortOrder
-): (a: Todo, b: Todo) => number {
-  const direction = order === 'desc' ? -1 : 1;
-  const comparator = COMPARATORS[sortBy];
-  return (a, b) => {
-    const diff = comparator(a, b);
-    if (diff !== 0) return diff * direction;
-    return a.createdAt.localeCompare(b.createdAt);
-  };
-}
-
-function sortTodos(
-  todos: readonly Todo[],
-  sortBy: SortBy,
-  order: SortOrder
-): Todo[] {
-  const comparator = createTodoComparator(sortBy, order);
-  return todos.toSorted(comparator);
-}
-
-interface IndexedTodo {
-  todo: Todo;
-  index: number;
-}
-
-function createIndexedComparator(
-  comparator: (a: Todo, b: Todo) => number
-): (a: IndexedTodo, b: IndexedTodo) => number {
-  return (left, right) => {
-    const diff = comparator(left.todo, right.todo);
-    if (diff !== 0) return diff;
-    return left.index - right.index;
-  };
-}
-
-function getHeapItem(heap: IndexedTodo[], index: number): IndexedTodo {
-  const item = heap[index];
-  if (!item) {
-    throw new Error('Heap index out of range');
-  }
-  return item;
-}
-
-function swapHeapItems(heap: IndexedTodo[], left: number, right: number): void {
-  const temp = getHeapItem(heap, left);
-  heap[left] = getHeapItem(heap, right);
-  heap[right] = temp;
-}
-
-function siftUpHeap(
-  heap: IndexedTodo[],
-  index: number,
-  isWorse: (a: IndexedTodo, b: IndexedTodo) => boolean
-): void {
-  let i = index;
-  while (i > 0) {
-    const parent = (i - 1) >> 1;
-    if (!isWorse(getHeapItem(heap, i), getHeapItem(heap, parent))) break;
-    swapHeapItems(heap, i, parent);
-    i = parent;
-  }
-}
-
-function siftDownHeap(
-  heap: IndexedTodo[],
-  index: number,
-  isWorse: (a: IndexedTodo, b: IndexedTodo) => boolean
-): void {
-  let i = index;
-  for (;;) {
-    const left = i * 2 + 1;
-    if (left >= heap.length) break;
-    const right = left + 1;
-    let worst = left;
-    if (
-      right < heap.length &&
-      isWorse(getHeapItem(heap, right), getHeapItem(heap, left))
-    ) {
-      worst = right;
-    }
-    if (!isWorse(getHeapItem(heap, worst), getHeapItem(heap, i))) break;
-    swapHeapItems(heap, i, worst);
-    i = worst;
-  }
-}
-
-function pushHeapItem(
-  heap: IndexedTodo[],
-  item: IndexedTodo,
-  isWorse: (a: IndexedTodo, b: IndexedTodo) => boolean
-): void {
-  heap.push(item);
-  siftUpHeap(heap, heap.length - 1, isWorse);
-}
-
-function selectTopKSorted(
-  todos: readonly Todo[],
-  k: number,
-  comparator: (a: Todo, b: Todo) => number
-): Todo[] {
-  if (k <= 0) return [];
-  if (k >= todos.length) return todos.toSorted(comparator);
-
-  const indexedComparator = createIndexedComparator(comparator);
-  const heap: IndexedTodo[] = [];
-  const isWorse = (a: IndexedTodo, b: IndexedTodo): boolean =>
-    indexedComparator(a, b) > 0;
-
-  for (let index = 0; index < todos.length; index += 1) {
-    const todo = todos[index];
-    if (!todo) continue;
-    const item: IndexedTodo = { todo, index };
-    if (heap.length < k) {
-      pushHeapItem(heap, item, isWorse);
-      continue;
-    }
-    const root = heap[0];
-    if (root && indexedComparator(item, root) < 0) {
-      heap[0] = item;
-      siftDownHeap(heap, 0, isWorse);
-    }
-  }
-
-  return heap.toSorted(indexedComparator).map((item) => item.todo);
-}
-
-function resolveCompletedFilter(
-  status: ListTodosFilters['status'],
-  completed: ListTodosFilters['completed']
-): boolean | undefined {
-  if (status === 'pending') return false;
-  if (status === 'completed') return true;
-  return completed;
-}
-
-function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
-  return {
-    completed: resolveCompletedFilter(filters.status, filters.completed),
-    query: filters.query,
-    sortBy: filters.sortBy ?? 'createdAt',
-    order: filters.order ?? 'asc',
-    limit: filters.limit ?? DEFAULT_LIMIT,
-    offset: filters.offset ?? DEFAULT_OFFSET,
-  };
 }
 
 function computeCounts(todos: readonly Todo[]): CountSummary {
-  const orderState = createOrderState();
-  const totals = todos.reduce(
-    (current, todo) => {
-      current.completed += Number(todo.completed);
-      updateOrderState(orderState, todo.createdAt);
-      return current;
-    },
-    { completed: 0 }
-  );
-  const total = todos.length;
+  const completed = todos.filter((t) => t.completed).length;
   return {
-    total,
-    completed: totals.completed,
-    pending: total - totals.completed,
-    isCreatedAtAsc: orderState.isCreatedAtAsc,
-    isCreatedAtDesc: orderState.isCreatedAtDesc,
+    total: todos.length,
+    completed,
+    pending: todos.length - completed,
   };
 }
 
-function createOrderState(): OrderState {
-  return {
-    previousCreatedAt: null,
-    isCreatedAtAsc: true,
-    isCreatedAtDesc: true,
-  };
-}
-
-function updateOrderState(state: OrderState, current: string): void {
-  const previous = state.previousCreatedAt;
-  if (previous === null) {
-    state.previousCreatedAt = current;
-    return;
-  }
-  if (current < previous) {
-    state.isCreatedAtAsc = false;
-  } else if (current > previous) {
-    state.isCreatedAtDesc = false;
-  }
-  state.previousCreatedAt = current;
-}
-
-function buildSummary(counts: CountSummary, pageCount: number): string {
+function buildSummary(counts: CountSummary): string {
   if (counts.total === 0) {
     return 'No todos found';
   }
-  return `Showing ${String(pageCount)} of ${String(counts.total)} todos (${String(
-    counts.pending
-  )} pending, ${String(counts.completed)} completed).`;
+  return `Found ${String(counts.total)} todos (${String(counts.pending)} pending, ${String(counts.completed)} completed)`;
 }
 
-function paginateTodos(
-  todos: readonly Todo[],
-  offset: number,
-  limit: number
-): Todo[] {
-  return todos.slice(offset, offset + limit);
-}
-
-function canReuseOrder(
-  _sortBy: SortBy,
-  order: SortOrder,
-  counts: CountSummary
-): boolean {
-  return order === 'asc' ? counts.isCreatedAtAsc : counts.isCreatedAtDesc;
+function resolveCompletedFilter(
+  status: ListTodosFilters['status']
+): boolean | undefined {
+  if (status === 'pending') return false;
+  if (status === 'completed') return true;
+  return undefined;
 }
 
 function buildListResponse(
-  paged: readonly Todo[],
-  counts: CountSummary,
-  normalized: NormalizedFilters
+  todos: readonly Todo[],
+  counts: CountSummary
 ): CallToolResult {
-  const summary = buildSummary(counts, paged.length);
-  const hasMore = normalized.offset + paged.length < counts.total;
-
   return createToolResponse({
     ok: true,
     result: {
-      items: paged,
-      summary,
+      items: todos,
+      summary: buildSummary(counts),
       counts: {
         total: counts.total,
         pending: counts.pending,
         completed: counts.completed,
       },
-      limit: normalized.limit,
-      offset: normalized.offset,
-      hasMore,
     },
   });
 }
@@ -533,26 +307,10 @@ function buildListResponse(
 async function handleListTodos(
   filters: ListTodosFilters
 ): Promise<CallToolResult> {
-  const normalized = normalizeFilters(filters);
-  const allTodos = await getTodos({
-    completed: normalized.completed,
-    query: normalized.query,
-  });
-
+  const completed = resolveCompletedFilter(filters.status);
+  const allTodos = await getTodos({ completed });
   const counts = computeCounts(allTodos);
-  const comparator = createTodoComparator(normalized.sortBy, normalized.order);
-  const pageSize = normalized.offset + normalized.limit;
-  const needsPartial = pageSize < allTodos.length;
-  let sorted: readonly Todo[];
-  if (canReuseOrder(normalized.sortBy, normalized.order, counts)) {
-    sorted = allTodos;
-  } else if (needsPartial) {
-    sorted = selectTopKSorted(allTodos, pageSize, comparator);
-  } else {
-    sorted = sortTodos(allTodos, normalized.sortBy, normalized.order);
-  }
-  const paged = paginateTodos(sorted, normalized.offset, normalized.limit);
-  return buildListResponse(paged, counts, normalized);
+  return buildListResponse(allTodos, counts);
 }
 
 export function registerListTodos(server: McpServer): void {
@@ -561,7 +319,7 @@ export function registerListTodos(server: McpServer): void {
     'list_todos',
     {
       title: 'List Todos',
-      description: 'List todos with filtering, search, sorting, and pagination',
+      description: 'List all todos with optional status filter',
       inputSchema: ListTodosFilterSchema,
       outputSchema: DefaultOutputSchema,
       annotations: {
@@ -582,28 +340,18 @@ export function registerListTodos(server: McpServer): void {
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 type UpdateFields = TodoUpdate;
 
-function assignFields(updates: UpdateFields, fields: UpdateTodoInput): void {
-  if (fields.description !== undefined)
-    updates.description = fields.description;
-  if (fields.completed !== undefined) updates.completed = fields.completed;
-}
-
-function buildUpdatePayload(
-  _baseTodo: Todo,
-  input: UpdateTodoInput
-): UpdateFields | null {
+function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
   const updates: UpdateFields = {};
-  assignFields(updates, input);
+  if (input.description !== undefined) updates.description = input.description;
   return Object.keys(updates).length > 0 ? updates : null;
 }
 
 async function handleUpdateTodo(
   input: UpdateTodoInput
 ): Promise<CallToolResult> {
-  const selector =
-    input.id !== undefined ? { id: input.id } : { query: input.query };
-  const outcome = await updateTodoBySelector(toResolveInput(selector), (todo) =>
-    buildUpdatePayload(todo, input)
+  const outcome = await updateTodoBySelector(
+    toResolveInput({ id: input.id }),
+    () => buildUpdatePayload(input)
   );
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
@@ -690,11 +438,9 @@ function buildOutcomeResponse(
 async function handleCompleteTodo(
   input: CompleteTodoInput
 ): Promise<CallToolResult> {
-  const targetCompleted = input.completed ?? true;
-  const selector =
-    input.id !== undefined ? { id: input.id } : { query: input.query };
+  const targetCompleted = true;
   const outcome = await completeTodoBySelector(
-    toResolveInput(selector),
+    toResolveInput({ id: input.id }),
     targetCompleted
   );
   return buildOutcomeResponse(outcome, targetCompleted);
@@ -726,33 +472,13 @@ export function registerCompleteTodo(server: McpServer): void {
 
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
 
-function getSelector(input: DeleteTodoInput): { id?: string; query?: string } {
-  return input.id !== undefined ? { id: input.id } : { query: input.query };
-}
-
-function buildDryRunMultiple(
-  previews: readonly unknown[],
-  total: number
-): CallToolResult {
-  return createToolResponse({
-    ok: true,
-    result: {
-      deletedIds: [],
-      summary: `Dry run: ${String(total)} todos would be deleted`,
-      matches: previews,
-      totalMatches: total,
-      dryRun: true,
-    },
-  });
-}
-
-function buildDeleteResponse(todo: Todo, dryRun: boolean): CallToolResult {
+function buildDeleteResponse(todo: Todo): CallToolResult {
   return createToolResponse({
     ok: true,
     result: {
       deletedIds: [todo.id],
-      summary: dryRun ? 'Dry run: would delete todo' : 'Deleted todo',
-      ...(dryRun ? { dryRun: true } : { nextActions: ['list_todos'] }),
+      summary: 'Deleted todo',
+      nextActions: ['list_todos'],
     },
   });
 }
@@ -760,26 +486,11 @@ function buildDeleteResponse(todo: Todo, dryRun: boolean): CallToolResult {
 async function handleDeleteTodo(
   input: DeleteTodoInput
 ): Promise<CallToolResult> {
-  const selector = getSelector(input);
-  const dryRun = input.dryRun ?? false;
-
-  if (dryRun) {
-    const todos = await getTodos();
-    const outcome = unwrapResolution(
-      resolveTodoTargetFromTodos(todos, toResolveInput(selector))
-    );
-    if (outcome.kind === 'error') return outcome.response;
-    if (outcome.kind === 'ambiguous') {
-      return buildDryRunMultiple(outcome.previews, outcome.matches.length);
-    }
-    return buildDeleteResponse(outcome.todo, true);
-  }
-
-  const outcome = await deleteTodoBySelector(toResolveInput(selector));
+  const outcome = await deleteTodoBySelector(toResolveInput({ id: input.id }));
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }
-  return buildDeleteResponse(outcome.todo, false);
+  return buildDeleteResponse(outcome.todo);
 }
 
 export function registerDeleteTodo(server: McpServer): void {
@@ -788,7 +499,7 @@ export function registerDeleteTodo(server: McpServer): void {
     'delete_todo',
     {
       title: 'Delete Todo',
-      description: 'Delete a todo item (supports dry-run)',
+      description: 'Delete a todo item by ID',
       inputSchema: DeleteTodoSchema,
       outputSchema: DefaultOutputSchema,
       annotations: {
