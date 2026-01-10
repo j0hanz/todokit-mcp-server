@@ -16,7 +16,6 @@ const TEST_TIMEOUT_MS = 5000;
 describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
   it('rejects unknown fields on add', () => {
     const result = AddTodoSchema.safeParse({
-      title: 'Test',
       description: 'Test desc',
       extra: 'nope',
     });
@@ -40,7 +39,7 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     const result = TodosSchema.safeParse([
       {
         id: '1',
-        title: 'Bad timestamp',
+        description: 'Bad timestamp',
         completed: false,
         createdAt: 'not-iso',
       },
@@ -52,7 +51,7 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     const result = TodosSchema.safeParse([
       {
         id: '1',
-        title: 'Extra field',
+        description: 'Extra field',
         completed: false,
         createdAt: '2025-02-28T10:30:00Z',
         extra: 'nope',

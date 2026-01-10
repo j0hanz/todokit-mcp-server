@@ -76,16 +76,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAddTodo(server);
     registerAddTodos(server);
 
-    const addHandler = getHandler<{ title: string }>('add_todo');
-    const batchHandler = getHandler<{ items: { title: string }[] }>(
+    const addHandler = getHandler<{ description: string }>('add_todo');
+    const batchHandler = getHandler<{ items: { description: string }[] }>(
       'add_todos'
     );
 
-    const addResult = await addHandler({ title: 'Task A' });
+    const addResult = await addHandler({ description: 'Task A' });
     assert.equal(getStructured(addResult)?.ok, true);
 
     const batchResult = await batchHandler({
-      items: [{ title: 'Task B' }, { title: 'Task C' }],
+      items: [{ description: 'Task B' }, { description: 'Task C' }],
     });
     assert.equal(getStructured(batchResult)?.ok, true);
 
@@ -98,8 +98,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerListTodos(server);
 
     const [alpha, beta] = await addTodos([
-      { title: 'Alpha', description: 'Alpha task' },
-      { title: 'Beta', description: 'Beta task' },
+      { description: 'Alpha task' },
+      { description: 'Beta task' },
     ]);
     assert.ok(alpha);
     assert.ok(beta);
@@ -107,7 +107,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const listHandler = getHandler<{ sortBy: string; order: string }>(
       'list_todos'
     );
-    const result = await listHandler({ sortBy: 'title', order: 'asc' });
+    const result = await listHandler({ sortBy: 'createdAt', order: 'asc' });
     const structured = getStructured(result)?.result as Record<string, unknown>;
 
     assert.deepEqual(structured.counts, {
@@ -115,10 +115,10 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       pending: 2,
       completed: 0,
     });
-    const titles = (structured.items as { title: string }[]).map(
-      (item) => item.title
+    const descriptions = (structured.items as { description: string }[]).map(
+      (item) => item.description
     );
-    assert.deepEqual(titles, ['Alpha', 'Beta']);
+    assert.deepEqual(descriptions, ['Alpha task', 'Beta task']);
   });
 
   it('lists todos with limit using createdAt sort', async () => {
@@ -126,9 +126,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerListTodos(server);
 
     const [first, second, third] = await addTodos([
-      { title: 'First', description: 'First task' },
-      { title: 'Second', description: 'Second task' },
-      { title: 'Third', description: 'Third task' },
+      { description: 'First task' },
+      { description: 'Second task' },
+      { description: 'Third task' },
     ]);
     assert.ok(first);
     assert.ok(second);
@@ -140,15 +140,15 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       limit: number;
     }>('list_todos');
     const result = await listHandler({
-      sortBy: 'title',
+      sortBy: 'createdAt',
       order: 'asc',
       limit: 2,
     });
     const structured = getStructured(result)?.result as Record<string, unknown>;
-    const titles = (structured.items as { title: string }[]).map(
-      (item) => item.title
+    const descriptions = (structured.items as { description: string }[]).map(
+      (item) => item.description
     );
-    assert.deepEqual(titles, ['First', 'Second']);
+    assert.deepEqual(descriptions, ['First task', 'Second task']);
   });
 
   it('lists empty results with summary', async () => {
@@ -173,8 +173,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerCompleteTodo(server);
 
     const [pending, completed] = await addTodos([
-      { title: 'Pending', description: 'Test' },
-      { title: 'Completed', description: 'Test' },
+      { description: 'Pending task' },
+      { description: 'Completed task' },
     ]);
     assert.ok(pending);
     assert.ok(completed);
@@ -211,16 +211,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerCompleteTodo(server);
     registerDeleteTodo(server);
 
-    const [todo] = await addTodos([{ title: 'Manage', description: 'Test' }]);
+    const [todo] = await addTodos([{ description: 'Manage this task' }]);
     assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
-      title?: string;
+      description?: string;
     }>('update_todo');
     const updateResult = await updateHandler({
       id: todo.id,
-      title: 'Updated Title',
+      description: 'Updated description',
     });
     assert.equal(getStructured(updateResult)?.ok, true);
 
@@ -233,25 +233,17 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(getStructured(deleteResult)?.ok, true);
   });
 
-  it('handles update clearFields and no-updates errors', async () => {
+  it('handles update no-updates errors', async () => {
     const { server, getHandler } = createToolHarness();
     registerUpdateTodo(server);
 
-    const [todo] = await addTodos([
-      { title: 'Update Me', description: 'Has description' },
-    ]);
+    const [todo] = await addTodos([{ description: 'Has description' }]);
     assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
-      clearFields?: string[];
+      description?: string;
     }>('update_todo');
-
-    const updateResult = await updateHandler({
-      id: todo.id,
-      clearFields: ['description'],
-    });
-    assert.equal(getStructured(updateResult)?.ok, true);
 
     const noUpdates = await updateHandler({ id: todo.id });
     const structured = getStructured(noUpdates);
@@ -262,9 +254,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerCompleteTodo(server);
 
-    const [todo] = await addTodos([
-      { title: 'Finish Me', description: 'Test' },
-    ]);
+    const [todo] = await addTodos([{ description: 'Finish this task' }]);
     assert.ok(todo);
     const completeHandler = getHandler<{ id: string; completed?: boolean }>(
       'complete_todo'
@@ -304,9 +294,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerDeleteTodos(server);
 
     await addTodos([
-      { title: 'Keep Me', description: 'Test' },
-      { title: 'Batch One', description: 'Test' },
-      { title: 'Batch Two', description: 'Test' },
+      { description: 'Keep this one' },
+      { description: 'Batch item one' },
+      { description: 'Batch item two' },
     ]);
 
     const deleteHandler = getHandler<{
@@ -330,10 +320,10 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal((liveStructured.deletedIds as unknown[]).length, 1);
 
     const remaining = await getTodos();
-    const remainingTitles = remaining.map((item) => item.title);
-    assert.equal(remainingTitles.includes('Keep Me'), true);
+    const remainingDescriptions = remaining.map((item) => item.description);
+    assert.equal(remainingDescriptions.includes('Keep this one'), true);
     assert.equal(
-      remainingTitles.filter((title) => title.startsWith('Batch')).length,
+      remainingDescriptions.filter((desc) => desc?.startsWith('Batch')).length,
       1
     );
   });
@@ -343,8 +333,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerDeleteTodo(server);
 
     await addTodos([
-      { title: 'Shared Item', description: 'Test' },
-      { title: 'Shared Item Two', description: 'Test' },
+      { description: 'Shared item one' },
+      { description: 'Shared item two' },
     ]);
 
     const deleteHandler = getHandler<{ query: string; dryRun: boolean }>(
@@ -362,9 +352,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerDeleteTodo(server);
 
     const [todo] = await addTodos([
-      { title: 'Unique Delete' },
-      { title: 'Batch Delete One' },
-      { title: 'Batch Delete Two' },
+      { description: 'Unique delete item' },
+      { description: 'Batch delete one' },
+      { description: 'Batch delete two' },
     ]);
     assert.ok(todo);
 

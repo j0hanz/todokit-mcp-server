@@ -56,8 +56,7 @@ export const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
 
 export interface Todo {
   id: string;
-  title: string;
-  description?: string | undefined;
+  description: string;
   completed: boolean;
   createdAt: string;
   updatedAt?: string | undefined;
@@ -66,8 +65,7 @@ export interface Todo {
 
 const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
-  title: z.string(),
-  description: z.string().optional(),
+  description: z.string(),
   completed: z.boolean(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema.optional(),
@@ -77,12 +75,10 @@ const TodoSchema: ZodType<Todo> = z.strictObject({
 export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
 
 type Status = 'pending' | 'completed' | 'all';
-type SortBy = 'createdAt' | 'title';
+type SortBy = 'createdAt';
 type SortOrder = 'asc' | 'desc';
-type ClearField = 'description';
 
 interface TodoInput {
-  title: string;
   description: string;
 }
 
@@ -108,10 +104,8 @@ type CompleteTodoInput = (SelectorById | SelectorByQuery) & {
 };
 
 interface UpdateTodoFieldsInput {
-  title?: string | undefined;
   description?: string | undefined;
   completed?: boolean | undefined;
-  clearFields?: ClearField[] | undefined;
 }
 
 type UpdateTodoInput = (SelectorById | SelectorByQuery) & UpdateTodoFieldsInput;
@@ -151,8 +145,7 @@ export const StatusSchema: ZodType<Status> = z.enum([
   'completed',
   'all',
 ]);
-const ClearFieldSchema: ZodType<ClearField> = z.enum(['description']);
-const SortBySchema: ZodType<SortBy> = z.enum(['createdAt', 'title']);
+const SortBySchema: ZodType<SortBy> = z.literal('createdAt');
 const SortOrderSchema: ZodType<SortOrder> = z.enum(['asc', 'desc']);
 
 function buildSelectorSchemas(
@@ -171,7 +164,6 @@ function buildSelectorSchemas(
   };
 }
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
-  title: z.string().min(1).max(200).describe('The title of the todo'),
   description: z.string().min(1).max(2000).describe('Description of the todo'),
 });
 
@@ -223,14 +215,13 @@ const updateTodoSelector = buildSelectorSchemas(
 );
 
 const UpdateTodoFieldsSchema = {
-  title: z.string().min(1).max(200).optional().describe('New title'),
-  description: z.string().max(2000).optional().describe('New description'),
-  completed: z.boolean().optional().describe('Completion status'),
-  clearFields: z
-    .array(ClearFieldSchema)
-    .max(1)
+  description: z
+    .string()
+    .min(1)
+    .max(2000)
     .optional()
-    .describe('Fields to clear'),
+    .describe('New description'),
+  completed: z.boolean().optional().describe('Completion status'),
 };
 
 export const UpdateTodoSchema: ZodType<UpdateTodoInput> = z.union([
@@ -250,7 +241,7 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       .min(1)
       .max(200)
       .optional()
-      .describe('Search text in title or description'),
+      .describe('Search text in description'),
     sortBy: SortBySchema.optional().describe('Sort results by field'),
     order: SortOrderSchema.optional().describe('Sort order (default: asc)'),
     limit: z

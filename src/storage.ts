@@ -292,10 +292,7 @@ function matchesCompleted(todo: Todo, completed?: boolean): boolean {
 
 function matchesQuery(todo: Todo, query?: string): boolean {
   if (!query) return true;
-
-  if (todo.title.toLowerCase().includes(query)) return true;
-  if (todo.description?.toLowerCase().includes(query)) return true;
-  return false;
+  return todo.description.toLowerCase().includes(query);
 }
 
 export function filterTodos(
@@ -312,7 +309,7 @@ export function filterTodos(
 
 export interface TodoMatchPreview {
   id: string;
-  title: string;
+  description: string;
   completed: boolean;
 }
 
@@ -324,7 +321,7 @@ function buildMatchPreviews(
 ): TodoMatchPreview[] {
   return todos.slice(0, limit).map((todo) => ({
     id: todo.id,
-    title: todo.title,
+    description: todo.description,
     completed: todo.completed,
   }));
 }
@@ -454,9 +451,10 @@ export function resolveTodoTargetFromTodos(
   return resolveByQueryFromTodos(todos, input.query);
 }
 
-export type TodoUpdate = Partial<
-  Pick<Todo, 'title' | 'description' | 'completed'>
->;
+export interface TodoUpdate {
+  description?: string;
+  completed?: boolean;
+}
 
 export function createNotFoundOutcome(id: string): MatchOutcome {
   return {
@@ -473,7 +471,6 @@ export type CompleteTodoOutcome =
   | { kind: 'already'; todo: Todo };
 
 interface NewTodoInput {
-  title: string;
   description: string;
 }
 
@@ -518,7 +515,6 @@ export async function getTodos(
 function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
   return {
     id: randomUUID(),
-    title: item.title,
     description: item.description,
     completed: false,
     createdAt: timestamp,

@@ -64,8 +64,8 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
       const { server, getHandler } = createToolHarness();
       registerAllTools(server);
 
-      const addHandler = getHandler<{ title: string }>('add_todo');
-      const addResult = await addHandler({ title: 'Diag Task' });
+      const addHandler = getHandler<{ description: string }>('add_todo');
+      const addResult = await addHandler({ description: 'Diag Task' });
       assert.equal((addResult as StructuredResult).structuredContent?.ok, true);
 
       const callEvent = toolEvents.find((event) => {

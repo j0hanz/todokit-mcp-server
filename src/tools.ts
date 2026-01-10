@@ -179,7 +179,7 @@ function buildAddTodoResponse(todo: Todo): CallToolResult {
     ok: true,
     result: {
       item: todo,
-      summary: `Added todo "${todo.title}"`,
+      summary: 'Added todo',
       nextActions: [...ADD_TODO_ACTIONS],
     },
   });
@@ -207,9 +207,9 @@ const addTodoToolConfig = {
 };
 
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
-  const { title, description } = input;
+  const { description } = input;
   try {
-    const todos = await addTodos([{ title, description }]);
+    const todos = await addTodos([{ description }]);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     return createErrorResponse('E_ADD_TODO', getErrorMessage(err));
@@ -257,7 +257,7 @@ export function registerAddTodos(server: McpServer): void {
 }
 
 type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
-type SortBy = 'createdAt' | 'title';
+type SortBy = 'createdAt';
 type SortOrder = 'asc' | 'desc';
 
 interface NormalizedFilters {
@@ -287,7 +287,6 @@ const DEFAULT_LIMIT = 50;
 const DEFAULT_OFFSET = 0;
 
 const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
-  title: (a, b) => a.title.localeCompare(b.title),
   createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
 };
 
@@ -499,11 +498,10 @@ function paginateTodos(
 }
 
 function canReuseOrder(
-  sortBy: SortBy,
+  _sortBy: SortBy,
   order: SortOrder,
   counts: CountSummary
 ): boolean {
-  if (sortBy !== 'createdAt') return false;
   return order === 'asc' ? counts.isCreatedAtAsc : counts.isCreatedAtDesc;
 }
 
@@ -583,33 +581,19 @@ export function registerListTodos(server: McpServer): void {
 
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 type UpdateFields = TodoUpdate;
-type ClearField = NonNullable<UpdateTodoInput['clearFields']>[number];
 
-function assignFields(
-  updates: UpdateFields,
-  fields: Omit<UpdateTodoInput, 'clearFields'>
-): void {
-  if (fields.title !== undefined) updates.title = fields.title;
+function assignFields(updates: UpdateFields, fields: UpdateTodoInput): void {
   if (fields.description !== undefined)
     updates.description = fields.description;
   if (fields.completed !== undefined) updates.completed = fields.completed;
-}
-
-function applyClears(updates: UpdateFields, clears: Set<ClearField>): void {
-  if (clears.has('description')) updates.description = undefined;
 }
 
 function buildUpdatePayload(
   _baseTodo: Todo,
   input: UpdateTodoInput
 ): UpdateFields | null {
-  const { clearFields = [], ...fields } = input;
-  const clears = new Set(clearFields);
   const updates: UpdateFields = {};
-
-  assignFields(updates, fields);
-  applyClears(updates, clears);
-
+  assignFields(updates, input);
   return Object.keys(updates).length > 0 ? updates : null;
 }
 
@@ -632,7 +616,7 @@ async function handleUpdateTodo(
     ok: true,
     result: {
       item: outcome.todo,
-      summary: `Updated todo "${outcome.todo.title}"`,
+      summary: 'Updated todo',
       nextActions: ['list_todos', 'complete_todo'],
     },
   });
@@ -676,20 +660,19 @@ function buildStatusResponse(todo: Todo, summary: string): CallToolResult {
 }
 
 function buildCompletionSummary(
-  title: string,
   already: boolean,
   targetCompleted: boolean
 ): string {
   if (already && targetCompleted) {
-    return `Todo "${title}" is already completed`;
+    return 'Todo is already completed';
   }
   if (already) {
-    return `Todo "${title}" is already pending`;
+    return 'Todo is already pending';
   }
   if (targetCompleted) {
-    return `Completed todo "${title}"`;
+    return 'Completed todo';
   }
-  return `Reopened todo "${title}"`;
+  return 'Reopened todo';
 }
 
 function buildOutcomeResponse(
@@ -700,11 +683,7 @@ function buildOutcomeResponse(
     return outcome.response;
   }
   const already = outcome.kind === 'already';
-  const summary = buildCompletionSummary(
-    outcome.todo.title,
-    already,
-    targetCompleted
-  );
+  const summary = buildCompletionSummary(already, targetCompleted);
   return buildStatusResponse(outcome.todo, summary);
 }
 
@@ -772,9 +751,7 @@ function buildDeleteResponse(todo: Todo, dryRun: boolean): CallToolResult {
     ok: true,
     result: {
       deletedIds: [todo.id],
-      summary: dryRun
-        ? `Dry run: would delete todo "${todo.title}"`
-        : `Deleted todo "${todo.title}"`,
+      summary: dryRun ? 'Dry run: would delete todo' : 'Deleted todo',
       ...(dryRun ? { dryRun: true } : { nextActions: ['list_todos'] }),
     },
   });
@@ -875,8 +852,8 @@ function resolveDeleteCompletedFilter(
   return COMPLETED_FILTER_BY_STATUS[status ?? 'all'];
 }
 
-function buildPreview(todo: Todo): { id: string; title: string } {
-  return { id: todo.id, title: todo.title };
+function buildPreview(todo: Todo): { id: string; description: string } {
+  return { id: todo.id, description: todo.description };
 }
 
 function buildNoMatchResponse(): CallToolResult {

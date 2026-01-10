@@ -15,36 +15,36 @@ const TEST_TIMEOUT_MS = 5000;
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('generates uuid-like ids', async () => {
-    const [todo] = await addTodos([{ title: 'ID Check', description: 'Test' }]);
+    const [todo] = await addTodos([{ description: 'ID Check test' }]);
     assert.ok(todo);
     assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
 
   it('adds todos and filters by query', async () => {
     const [todoA, todoB, todoC] = await addTodos([
-      { title: 'Alpha', description: 'Alpha desc' },
-      { title: 'Beta', description: 'Beta desc' },
-      { title: 'Gamma', description: 'Gamma desc' },
+      { description: 'Alpha description here' },
+      { description: 'Beta description here' },
+      { description: 'Gamma description here' },
     ]);
     assert.ok(todoA);
     assert.ok(todoB);
     assert.ok(todoC);
 
-    const byQuery = await getTodos({ query: 'alpha desc' });
+    const byQuery = await getTodos({ query: 'alpha' });
     assert.deepEqual(
       byQuery.map((todo) => todo.id),
       [todoA.id]
     );
 
-    const byTitle = await getTodos({ query: 'beta' });
+    const byBeta = await getTodos({ query: 'beta' });
     assert.deepEqual(
-      byTitle.map((todo) => todo.id),
+      byBeta.map((todo) => todo.id),
       [todoB.id]
     );
   });
 
   it('updates todo completion', async () => {
-    const [todo] = await addTodos([{ title: 'Delta', description: 'Test' }]);
+    const [todo] = await addTodos([{ description: 'Delta completion test' }]);
     assert.ok(todo);
 
     const completed = await updateTodoBySelector({ id: todo.id }, () => ({
@@ -69,7 +69,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('deletes todos', async () => {
-    const [todo] = await addTodos([{ title: 'Epsilon', description: 'Test' }]);
+    const [todo] = await addTodos([{ description: 'Epsilon delete test' }]);
     assert.ok(todo);
     const deleted = await deleteTodoBySelector({ id: todo.id });
     assert.equal(deleted.kind, 'match');
@@ -84,8 +84,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('serializes concurrent writes', async () => {
     const count = 25;
     const items = Array.from({ length: count }, (_, index) => ({
-      title: `Task ${index}`,
-      description: 'Concurrent test',
+      description: `Concurrent test item ${index}`,
     }));
     await Promise.all(items.map((item) => addTodos([item])));
     const todos = await getTodos();
