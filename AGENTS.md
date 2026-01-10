@@ -2,117 +2,111 @@
 
 ## Project Overview
 
-- This repo is an MCP (Model Context Protocol) **stdio** server that provides a todo/task-management toolset backed by **JSON file storage**.
-- Tech stack: **TypeScript** (ESM, `moduleResolution: NodeNext`), **Node.js** `>=20`, \*\*@modelcontextprotocol/sdk`, Zod v4,`node:test`+`tsx` for tests.
-- Entrypoint: `src/index.ts` (build outputs to `dist/index.js`, published as the `todokit-mcp` binary).
+- MCP (Model Context Protocol) server that manages a JSON-backed todo list.
+- Tech stack: Node.js (ESM), TypeScript, `@modelcontextprotocol/sdk` (stdio transport), Zod v4.
+- Primary entrypoint/binary: `dist/index.js` (package bin: `todokit-mcp`).
 
 ## Repo Map / Structure
 
-- `src/`
-  - `index.ts`: MCP server bootstrap (stdio), CLI arg parsing, shutdown hooks.
-  - `tools.ts`: tool registrations + tool logic wrappers.
-  - `storage.ts`: JSON persistence, filtering/matching, and CRUD operations.
-  - `schema.ts`: Zod schemas and shared types.
-  - `responses.ts`: tool response helpers (structuredContent + JSON string).
-  - `diagnostics.ts`: diagnostics_channel publishing + default stderr subscribers.
-- `tests/`: `node --test` test suite (files `tests/*.test.ts`).
-- `dist/`: build output (generated).
-- `.github/workflows/publish.yml`: release-time publish workflow (runs lint/type-check/tests/coverage/dup-check/build).
-- `scripts/Quality-Gates.ps1`: optional quality/metrics and safe-refactor helper.
-- `coverage/`, `report/`, `metrics/`, `logs/`: generated artifacts / reports.
+- `src/`: server implementation
+  - `src/index.ts`: stdio server entrypoint + CLI parsing + shutdown handling
+  - `src/tools.ts`: MCP tool registrations + diagnostics wrapper
+  - `src/schema.ts`: Zod schemas and shared types
+  - `src/storage.ts`: JSON persistence (queued writes + atomic writes)
+  - `src/diagnostics.ts`: diagnostics channels + optional stderr subscribers
+  - `src/responses.ts`: tool response helpers (`content` + `structuredContent`)
+- `tests/`: `node:test` test suite (`tests/*.test.ts`)
+- `docs/`: assets (e.g., `docs/logo.png`)
+- `.github/workflows/`: CI automation (publish workflow)
+- `scripts/`: repo tooling (e.g., `scripts/Quality-Gates.ps1`)
+- Build/test artifacts (generated): `dist/`, `coverage/`, `report/`, `logs/`, `metrics/`
 
 ## Setup & Environment
 
-- Required Node.js: `>=20.0.0` (see `package.json#engines`).
-- Package manager: `npm` (repo includes `package-lock.json`).
-- Install deps:
+- Node.js: `>=20.0.0` (see `package.json` engines; CI uses Node 20).
+- Install dependencies:
   - `npm install`
-  - CI-style install: `npm ci`
+  - CI uses `npm ci`
 
 ## Development Workflow
 
-- Dev/watch (runs from source): `npm run dev` (uses `tsx watch src/index.ts`).
-- Build: `npm run build` (outputs to `dist/`).
-- Run built server: `npm start` (executes `node dist/index.js`).
+- Dev (watch): `npm run dev` (runs `tsx watch src/index.ts`).
+- Build: `npm run build` (TypeScript build to `dist/`).
+- Run built server: `npm start`.
+- MCP Inspector (stdio): `npm run inspector -- node dist/index.js`.
 
-Runtime configuration (supported by the code + README):
+Configuration (verified in `src/index.ts` + `src/storage.ts`):
 
-- Storage file path:
-  - Env: `TODOKIT_TODO_FILE=/path/to/todos.json`
-  - CLI: `--todo-file ./todos.json` (alias `-f`)
+- Storage path:
+  - Env: `TODOKIT_TODO_FILE` (absolute or relative; resolved against current working directory).
+  - CLI: `--todo-file` / `-f` (sets `TODOKIT_TODO_FILE` at startup).
 - JSON formatting:
-  - `TODOKIT_JSON_PRETTY=0` or `false` to write compact JSON.
+  - Env: `TODOKIT_JSON_PRETTY`
+  - If set to `0` or `false`, writes compact JSON; otherwise pretty-prints with 2 spaces.
 - Diagnostics:
-  - CLI: `--diagnostics` (alias `-d`) to emit JSON diagnostics lines to **stderr**.
-  - CLI: `--log-level error|warn|info|debug` (alias `-l`) controls diagnostic verbosity when enabled.
+  - CLI: `--diagnostics` / `-d` enables default subscribers.
+  - CLI: `--log-level` / `-l` one of `error|warn|info|debug` (only used when diagnostics enabled).
 
 ## Testing
 
-- Run tests: `npm run test`
-  - Script: `node --import tsx/esm --test tests/*.test.ts`
-- Coverage: `npm run test:coverage`
-  - Script: `node --import tsx/esm --test --experimental-test-coverage tests/*.test.ts`
-- Test location/pattern: `tests/*.test.ts`.
+- Run all tests: `npm run test` (executes `node --import tsx/esm --test tests/*.test.ts`).
+- Coverage: `npm run test:coverage`.
+- Test locations/patterns: `tests/*.test.ts`.
 
 ## Code Style & Conventions
 
-- Language/Module system:
-  - TypeScript `strict` with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
-  - ESM + NodeNext resolution; use **`.js` extensions** in local imports.
-- Formatting:
-  - `npm run format` (Prettier).
-  - Import sorting is enforced via `@trivago/prettier-plugin-sort-imports` (see `.prettierrc`).
-- Linting:
-  - `npm run lint` (ESLint).
-  - `eslint.config.mjs` enables `typescript-eslint` strict/stylistic configs and enforces unused-import removal rules.
-- Types:
-  - `npm run type-check` (`tsc --noEmit`).
-- MCP response contract (repo convention):
-  - Tool results include **both** `structuredContent` and a JSON string in `content`.
-  - Avoid stdout logging in server runtime (stdio transport).
+- TypeScript:
+  - ESM + NodeNext resolution (`"type": "module"`, `moduleResolution: "NodeNext"`).
+  - Strict settings enabled: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `isolatedModules`.
+  - Local imports use `.js` extensions (NodeNext ESM convention).
+- Lint:
+  - `npm run lint` (ESLint flat config in `eslint.config.mjs`).
+- Format:
+  - `npm run format` (writes)
+  - `npm run format:check` (CI-friendly check)
+- Zod:
+  - Prefer `z.strictObject(...)` for object schemas (unknown fields rejected).
+- MCP responses:
+  - Tools return both `content` (stringified JSON) and `structuredContent`.
 
 ## Build / Release
 
-- Build output directory: `dist/`.
-- Primary build command: `npm run build`.
-- Release publishing (GitHub Actions on `release: published`): `.github/workflows/publish.yml` runs:
-  - `npm ci`
-  - `npm run lint`
-  - `npm run type-check`
-  - `npm run test`
-  - `npm run test:coverage`
-  - `npm run dup-check`
-  - `npm run build`
-  - `npm publish --access public` (Trusted Publishing / OIDC)
+- Build output: `dist/`.
+- Local release gate (prepublish): `npm run prepublishOnly` (runs `lint`, `type-check`, `build`).
+- GitHub release publishing:
+  - Workflow: `.github/workflows/publish.yml` runs on GitHub Release “published”.
+  - Checks executed before publish: `lint`, `type-check`, `test`, `test:coverage`, `dup-check`, `build`.
+  - Versioning: workflow derives version from the git tag name (expects `vX.Y.Z`, strips leading `v`).
+  - Publishing: `npm publish --access public` via npm Trusted Publishing (OIDC).
 
 ## Security & Safety
 
-- **stdio rule**: do not write non-MCP output to stdout. Use stderr for logs/diagnostics.
-- Avoid adding networked behavior without explicitly marking it (and updating tool annotations) — this server is primarily local file I/O.
-- Prefer strict input validation (Zod) and bounded sizes (min/max) for tool inputs.
-- Do not commit secrets. Use environment variables for runtime config.
+- Stdio transport: do not write non-MCP output to stdout (use stderr for diagnostics/logging).
+- File I/O is local JSON storage; changing storage semantics should preserve:
+  - queued writes (single-writer behavior)
+  - atomic writes (`writeFile` to temp + rename)
+  - timeouts for read/stat/write operations
+- Avoid introducing network access or new dependencies unless required.
 
 ## Pull Request / Commit Guidelines
 
-- Before opening a PR, run the same checks CI runs:
-  - `npm run format`
+- No explicit commit message convention found in repo files.
+- Before opening a PR, run the same checks as CI publish workflow:
   - `npm run lint`
   - `npm run type-check`
   - `npm run test`
   - `npm run test:coverage`
   - `npm run dup-check`
   - `npm run build`
-- Optional: use `scripts/Quality-Gates.ps1` for measuring/comparing quality metrics and safe refactors.
+- If formatting changes are included:
+  - `npm run format:check` (or `npm run format` to fix).
 
 ## Troubleshooting
 
-- “Client can’t parse MCP output” / protocol errors:
-  - Ensure nothing writes to stdout (use stderr only).
-- CLI flags not taking effect when using `npx`:
-  - Forward args with `--`, e.g. `npx -y @j0hanz/todokit-mcp@latest -- --diagnostics`.
-- Tests fail due to ESM loader issues:
-  - Use the provided script (`npm run test`) which runs `node --import tsx/esm --test ...`.
-
-## Open Questions / TODO
-
-- None identified from repository files scanned (no missing/ambiguous workflow details found).
+- Inspector fails:
+  - Ensure build exists first: `npm run build`, then `npm run inspector -- node dist/index.js`.
+  - If using `npx` and passing flags, forward args after `--` (e.g., `npx -y @j0hanz/todokit-mcp@latest -- --todo-file ./todos.json`).
+- “Invalid todo storage format”:
+  - The JSON file didn’t validate against the todo schema; fix the JSON or point `TODOKIT_TODO_FILE` to a new path.
+- “Corrupted MCP protocol” symptoms:
+  - Check for accidental stdout logging; only MCP traffic should go to stdout.
