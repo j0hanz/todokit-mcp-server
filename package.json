@@ -1,6 +1,6 @@
 {
   "name": "@j0hanz/todokit-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "mcpName": "io.github.j0hanz/todokit",
   "description": "A MCP server for Todokit, a task management and productivity tool with JSON storage.",
   "type": "module",
