@@ -35,7 +35,6 @@ import {
   DefaultOutputSchema,
   DeleteTodoSchema,
   ListTodosFilterSchema,
-  StatusSchema,
   type Todo,
   UpdateTodoSchema,
 } from './schema.js';
@@ -43,8 +42,8 @@ import {
   addTodos,
   completeTodoBySelector,
   type CompleteTodoOutcome,
+  deleteAllTodos,
   deleteTodoBySelector,
-  deleteTodosByIds,
   getTodos,
   type TodoUpdate,
   toResolveInput,
@@ -407,43 +406,30 @@ function buildStatusResponse(todo: Todo, summary: string): CallToolResult {
   });
 }
 
-function buildCompletionSummary(
-  already: boolean,
-  targetCompleted: boolean
-): string {
-  if (already && targetCompleted) {
+function buildCompletionSummary(already: boolean): string {
+  if (already) {
     return 'Todo is already completed';
   }
-  if (already) {
-    return 'Todo is already pending';
-  }
-  if (targetCompleted) {
-    return 'Completed todo';
-  }
-  return 'Reopened todo';
+  return 'Completed todo';
 }
 
-function buildOutcomeResponse(
-  outcome: CompleteTodoOutcome,
-  targetCompleted: boolean
-): CallToolResult {
+function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
   if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
     return outcome.response;
   }
   const already = outcome.kind === 'already';
-  const summary = buildCompletionSummary(already, targetCompleted);
+  const summary = buildCompletionSummary(already);
   return buildStatusResponse(outcome.todo, summary);
 }
 
 async function handleCompleteTodo(
   input: CompleteTodoInput
 ): Promise<CallToolResult> {
-  const targetCompleted = true;
   const outcome = await completeTodoBySelector(
     toResolveInput({ id: input.id }),
-    targetCompleted
+    true
   );
-  return buildOutcomeResponse(outcome, targetCompleted);
+  return buildOutcomeResponse(outcome);
 }
 
 export function registerCompleteTodo(server: McpServer): void {
@@ -452,7 +438,7 @@ export function registerCompleteTodo(server: McpServer): void {
     'complete_todo',
     {
       title: 'Complete Todo',
-      description: 'Set completion status for a todo item',
+      description: 'Mark a todo as completed',
       inputSchema: CompleteTodoSchema,
       outputSchema: DefaultOutputSchema,
       annotations: {
@@ -518,120 +504,19 @@ export function registerDeleteTodo(server: McpServer): void {
   );
 }
 
-type FilterKey = 'status' | 'query';
-const FILTER_KEYS: FilterKey[] = ['status', 'query'];
-
-function hasAtLeastOneFilter(v: Record<string, unknown>): boolean {
-  return FILTER_KEYS.some((key) => v[key] !== undefined);
-}
-
-const DeleteTodosSchema = z
-  .strictObject({
-    status: StatusSchema.optional().describe('Filter by status'),
-    query: z.string().min(1).max(200).optional().describe('Search text filter'),
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('Preview deletion without removing data'),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('Max items to delete (default: 10, safety limit)'),
-  })
-  .refine(hasAtLeastOneFilter, {
-    error: 'At least one filter is required for bulk delete',
-  });
-
-type DeleteTodosInput = z.infer<typeof DeleteTodosSchema>;
-
-const DEFAULT_DELETE_LIMIT = 10;
-const COMPLETED_FILTER_BY_STATUS: Record<
-  'pending' | 'completed' | 'all',
-  boolean | undefined
-> = {
-  pending: false,
-  completed: true,
-  all: undefined,
-};
-
-function resolveDeleteCompletedFilter(
-  status?: 'pending' | 'completed' | 'all'
-): boolean | undefined {
-  return COMPLETED_FILTER_BY_STATUS[status ?? 'all'];
-}
-
-function buildPreview(todo: Todo): { id: string; description: string } {
-  return { id: todo.id, description: todo.description };
-}
-
-function buildNoMatchResponse(): CallToolResult {
-  return createToolResponse({
-    ok: true,
-    result: {
-      deletedIds: [],
-      summary: 'No todos matched the filters',
-      totalMatched: 0,
-    },
-  });
-}
-
-function buildDryRunResponse(
-  toDelete: Todo[],
-  totalMatched: number
-): CallToolResult {
-  return createToolResponse({
-    ok: true,
-    result: {
-      deletedIds: [],
-      summary: `Dry run: ${String(toDelete.length)} of ${String(totalMatched)} matching todos would be deleted`,
-      matches: toDelete.map(buildPreview),
-      totalMatched,
-      dryRun: true,
-    },
-  });
-}
-
-function buildDeletedResponse(
-  deletedIds: string[],
-  totalMatched: number
-): CallToolResult {
+async function handleDeleteTodos(): Promise<CallToolResult> {
+  const deletedIds = await deleteAllTodos();
   return createToolResponse({
     ok: true,
     result: {
       deletedIds,
-      summary: `Deleted ${String(deletedIds.length)} todos`,
-      totalMatched,
-      nextActions: ['list_todos'],
+      summary:
+        deletedIds.length === 0
+          ? 'No todos to delete'
+          : `Deleted ${String(deletedIds.length)} todos`,
+      nextActions: ['add_todo'],
     },
   });
-}
-
-async function handleDeleteTodos(
-  input: DeleteTodosInput
-): Promise<CallToolResult> {
-  const { limit = DEFAULT_DELETE_LIMIT, dryRun = false } = input;
-
-  const matches = await getTodos({
-    completed: resolveDeleteCompletedFilter(input.status),
-    query: input.query,
-  });
-
-  const totalMatched = matches.length;
-  if (totalMatched === 0) {
-    return buildNoMatchResponse();
-  }
-
-  const toDelete = matches.slice(0, limit);
-
-  if (dryRun) {
-    return buildDryRunResponse(toDelete, totalMatched);
-  }
-
-  const deletedIds = await deleteTodosByIds(toDelete.map((t) => t.id));
-  return buildDeletedResponse(deletedIds, totalMatched);
 }
 
 export function registerDeleteTodos(server: McpServer): void {
@@ -639,20 +524,19 @@ export function registerDeleteTodos(server: McpServer): void {
     server,
     'delete_todos',
     {
-      title: 'Delete Todos (Bulk)',
-      description:
-        'Delete multiple todos matching filters (requires at least one filter, defaults to limit=10 for safety)',
-      inputSchema: DeleteTodosSchema,
+      title: 'Delete All Todos',
+      description: 'Delete all todos from the list',
+      inputSchema: z.object({}),
       outputSchema: DefaultOutputSchema,
       annotations: {
         readOnlyHint: false,
-        idempotentHint: false,
+        idempotentHint: true,
         destructiveHint: true,
       },
     },
-    async (input) => {
+    async () => {
       try {
-        return await handleDeleteTodos(input);
+        return await handleDeleteTodos();
       } catch (err) {
         return createErrorResponse('E_DELETE_TODOS', getErrorMessage(err));
       }

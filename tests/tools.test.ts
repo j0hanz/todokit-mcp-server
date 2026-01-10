@@ -278,43 +278,25 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.match(String(alreadyStructured.summary ?? ''), /already completed/i);
   });
 
-  it('deletes todos in bulk with filters', async () => {
+  it('deletes all todos', async () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodos(server);
 
     await addTodos([
-      { description: 'Keep this one' },
-      { description: 'Batch item one' },
-      { description: 'Batch item two' },
+      { description: 'Item one' },
+      { description: 'Item two' },
+      { description: 'Item three' },
     ]);
 
-    const deleteHandler = getHandler<{
-      query: string;
-      dryRun?: boolean;
-      limit?: number;
-    }>('delete_todos');
+    const deleteHandler = getHandler<Record<string, never>>('delete_todos');
+    const result = await deleteHandler({});
+    const structured = getStructured(result)?.result as Record<string, unknown>;
 
-    const dryRunResult = await deleteHandler({ query: 'Batch', dryRun: true });
-    const dryRunStructured = getStructured(dryRunResult)?.result as Record<
-      string,
-      unknown
-    >;
-    assert.equal(dryRunStructured.dryRun, true);
-
-    const liveResult = await deleteHandler({ query: 'Batch', limit: 1 });
-    const liveStructured = getStructured(liveResult)?.result as Record<
-      string,
-      unknown
-    >;
-    assert.equal((liveStructured.deletedIds as unknown[]).length, 1);
+    assert.equal((structured.deletedIds as unknown[]).length, 3);
+    assert.match(String(structured.summary ?? ''), /deleted 3 todos/i);
 
     const remaining = await getTodos();
-    const remainingDescriptions = remaining.map((item) => item.description);
-    assert.equal(remainingDescriptions.includes('Keep this one'), true);
-    assert.equal(
-      remainingDescriptions.filter((desc) => desc?.startsWith('Batch')).length,
-      1
-    );
+    assert.equal(remaining.length, 0);
   });
 
   it('delete_todo requires exact id', async () => {

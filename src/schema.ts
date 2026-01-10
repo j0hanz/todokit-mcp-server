@@ -55,7 +55,7 @@ export interface Todo {
   completedAt?: string | undefined;
 }
 
-const TodoSchema: ZodType<Todo> = z.strictObject({
+export const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   description: z.string(),
   completed: z.boolean(),
@@ -81,6 +81,7 @@ interface TodoByIdInput {
 }
 
 type DeleteTodoInput = TodoByIdInput;
+
 type CompleteTodoInput = TodoByIdInput;
 
 interface UpdateTodoInput {

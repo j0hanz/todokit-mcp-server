@@ -658,3 +658,10 @@ export function deleteTodosByIds(ids: string[]): Promise<string[]> {
     return { todos: remaining, result: deletedIds };
   });
 }
+
+export function deleteAllTodos(): Promise<string[]> {
+  return withTodos((todos) => {
+    const deletedIds = todos.map((todo) => todo.id);
+    return { todos: [], result: deletedIds };
+  });
+}

@@ -16,14 +16,11 @@ An MCP server for Todokit, a task management and productivity tool with JSON sto
 
 ## Features
 
-- Task management: add, update, complete/reopen, and delete todos.
-- Batch operations: add multiple todos and bulk delete with filters.
-- Rich filtering: status, priority, tags, due dates, and free-text search.
-- Tagging: tags are normalized (trimmed, lowercase, unique) and can be added or removed.
-- Safe deletion: dry-run previews before deleting; bulk delete defaults to a safety limit.
+- Task management: add, update, complete, and delete todos.
+- Batch operations: add multiple todos at once.
+- Simple filtering: status-based filtering for lists.
 - JSON persistence with queued writes and atomic file writes.
 - Optional diagnostics events (tool calls/results, storage, lifecycle) via Node diagnostics channels.
-- List summaries with counts (pending, completed, overdue) and pagination metadata.
 
 ## Quick Start
 
@@ -139,19 +136,15 @@ Error payload:
 }
 ```
 
-The `result` shape is tool-specific. If a `query` matches multiple todos, most tools return `E_AMBIGUOUS` with preview matches and a hint to use an exact `id`. `delete_todo` with `dryRun: true` instead returns an ok response with `matches` and `totalMatches` for preview.
+The `result` shape is tool-specific.
 
 ### add_todo
 
 Add a new todo item.
 
-| Parameter   | Type   | Required | Default | Description                           |
-| :---------- | :----- | :------- | :------ | :------------------------------------ |
-| title       | string | Yes      | -       | The title of the todo (1-200 chars)   |
-| description | string | No       | -       | Optional description (max 2000 chars) |
-| priority    | string | No       | normal  | Priority level: low, normal, high     |
-| dueDate     | string | No       | -       | Due date in ISO format (YYYY-MM-DD)   |
-| tags        | array  | No       | -       | Array of tags (max 50, 1-50 chars)    |
+| Parameter   | Type   | Required | Description                            |
+| :---------- | :----- | :------- | :------------------------------------- |
+| description | string | Yes      | Description of the todo (1-2000 chars) |
 
 Result fields:
 
@@ -163,9 +156,9 @@ Result fields:
 
 Add multiple todo items in one call.
 
-| Parameter | Type  | Required | Default | Description                                                 |
-| :-------- | :---- | :------- | :------ | :---------------------------------------------------------- |
-| items     | array | Yes      | -       | Array of todo objects (same fields as add_todo, 1-50 items) |
+| Parameter | Type  | Required | Description                                            |
+| :-------- | :---- | :------- | :----------------------------------------------------- |
+| items     | array | Yes      | Array of objects with `description` field (1-50 items) |
 
 Result fields:
 
@@ -175,55 +168,29 @@ Result fields:
 
 ### list_todos
 
-List todos with filtering, search, sorting, and pagination.
+List all todos with optional status filter.
 
-| Parameter | Type    | Required | Default   | Description                                       |
-| :-------- | :------ | :------- | :-------- | :------------------------------------------------ |
-| status    | string  | No       | all       | Filter by status: pending, completed, all         |
-| completed | boolean | No       | -         | Deprecated; status takes precedence when provided |
-| priority  | string  | No       | -         | Filter by priority: low, normal, high             |
-| tag       | string  | No       | -         | Filter by tag (must contain)                      |
-| query     | string  | No       | -         | Search text in title, description, or tags        |
-| dueBefore | string  | No       | -         | Filter todos due before this date (YYYY-MM-DD)    |
-| dueAfter  | string  | No       | -         | Filter todos due after this date (YYYY-MM-DD)     |
-| sortBy    | string  | No       | createdAt | Sort by: dueDate, priority, createdAt, title      |
-| order     | string  | No       | asc       | Sort order: asc, desc                             |
-| limit     | number  | No       | 50        | Max number of results (1-200)                     |
-| offset    | number  | No       | 0         | Number of results to skip (0-10000)               |
+| Parameter | Type   | Required | Default | Description                               |
+| :-------- | :----- | :------- | :------ | :---------------------------------------- |
+| status    | string | No       | all     | Filter by status: pending, completed, all |
 
 Result fields:
 
 - `items` (todos)
 - `summary`
-- `counts` (`total`, `pending`, `completed`, `overdue`)
-- `limit`
-- `offset`
-- `hasMore` (true if more results are available after this page)
-
-Notes:
-
-- Overdue calculations compare `dueDate` against the server's local calendar date (YYYY-MM-DD).
+- `counts` (`total`, `pending`, `completed`)
 
 ### update_todo
 
-Update fields on a todo item. Provide either `id` or `query` to identify the todo.
+Update fields on a todo item.
 
-| Parameter   | Type    | Required | Default | Description                                    |
-| :---------- | :------ | :------- | :------ | :--------------------------------------------- |
-| id          | string  | No       | -       | The ID of the todo to update                   |
-| query       | string  | No       | -       | Search text to find a single todo to update    |
-| title       | string  | No       | -       | New title                                      |
-| description | string  | No       | -       | New description                                |
-| completed   | boolean | No       | -       | Completion status                              |
-| priority    | string  | No       | -       | New priority level                             |
-| dueDate     | string  | No       | -       | New due date (YYYY-MM-DD)                      |
-| tags        | array   | No       | -       | Replace all tags (max 50)                      |
-| tagOps      | object  | No       | -       | Tag modifications to apply (add/remove arrays) |
-| clearFields | array   | No       | -       | Fields to clear: description, dueDate, tags    |
+| Parameter   | Type   | Required | Description                    |
+| :---------- | :----- | :------- | :----------------------------- |
+| id          | string | Yes      | The ID of the todo to update   |
+| description | string | No       | New description (1-2000 chars) |
 
 Notes:
 
-- If both `tags` and `tagOps` are provided, `tags` wins and replaces the list.
 - If no updatable fields are provided, the tool returns an error.
 
 Result fields:
@@ -234,66 +201,45 @@ Result fields:
 
 ### complete_todo
 
-Set completion status for a todo item. Provide either `id` or `query`.
+Mark a todo as completed.
 
-| Parameter | Type    | Required | Default | Description                       |
-| :-------- | :------ | :------- | :------ | :-------------------------------- |
-| id        | string  | No       | -       | The ID of the todo to complete    |
-| query     | string  | No       | -       | Search text to find a single todo |
-| completed | boolean | No       | true    | Set completion status             |
+| Parameter | Type   | Required | Description        |
+| :-------- | :----- | :------- | :----------------- |
+| id        | string | Yes      | The ID of the todo |
 
 Result fields:
 
 - `item` (todo)
-- `summary` (includes already-complete or reopen messages)
+- `summary`
 - `nextActions`
 
 ### delete_todo
 
-Delete a todo item. Provide either `id` or `query`.
+Delete a todo item by ID.
 
-| Parameter | Type    | Required | Default | Description                             |
-| :-------- | :------ | :------- | :------ | :-------------------------------------- |
-| id        | string  | No       | -       | The ID of the todo to delete            |
-| query     | string  | No       | -       | Search text to find a single todo       |
-| dryRun    | boolean | No       | false   | Simulate deletion without changing data |
+| Parameter | Type   | Required | Description                  |
+| :-------- | :----- | :------- | :--------------------------- |
+| id        | string | Yes      | The ID of the todo to delete |
 
 Result fields:
 
 - `deletedIds` (array)
 - `summary`
-- `nextActions` (only when not dryRun)
-- `dryRun` (when dryRun is true)
-- `matches`, `totalMatches` (dry-run + multiple matches)
+- `nextActions`
 
 ### delete_todos
 
-Delete multiple todos matching filters. At least one filter is required; defaults to limit=10 for safety.
+Delete all todos from the list.
 
-| Parameter | Type    | Required | Default | Description                                    |
-| :-------- | :------ | :------- | :------ | :--------------------------------------------- |
-| status    | string  | No       | -       | Filter by status: pending, completed, all      |
-| priority  | string  | No       | -       | Filter by priority: low, normal, high          |
-| tag       | string  | No       | -       | Filter by tag                                  |
-| dueBefore | string  | No       | -       | Delete todos due before this date (YYYY-MM-DD) |
-| dueAfter  | string  | No       | -       | Delete todos due after this date (YYYY-MM-DD)  |
-| query     | string  | No       | -       | Search text filter (1-200 chars)               |
-| dryRun    | boolean | No       | false   | Preview deletion without removing data         |
-| limit     | number  | No       | 10      | Max items to delete (1-100, safety limit)      |
-
-Notes:
-
-- At least one filter (status, priority, tag, dueBefore, dueAfter, query) is required.
-- The default limit of 10 prevents accidental mass deletions.
+| Parameter | Type | Required | Default | Description |
+| :-------- | :--- | :------- | :------ | :---------- |
+| (none)    | -    | -        | -       | -           |
 
 Result fields:
 
 - `deletedIds` (array)
 - `summary`
-- `totalMatched`
-- `matches` (dry-run only, array of previews)
-- `dryRun` (when dryRun is true)
-- `nextActions` (only when not dryRun)
+- `nextActions`
 
 ## Data Model
 
@@ -302,12 +248,8 @@ A todo item has the following shape:
 ```json
 {
   "id": "string",
-  "title": "string",
-  "description": "string?",
+  "description": "string",
   "completed": false,
-  "priority": "low|normal|high",
-  "dueDate": "YYYY-MM-DD?",
-  "tags": ["string"],
   "createdAt": "ISO timestamp with offset",
   "updatedAt": "ISO timestamp with offset?",
   "completedAt": "ISO timestamp with offset?"
@@ -316,7 +258,6 @@ A todo item has the following shape:
 
 Notes:
 
-- `dueDate` uses `YYYY-MM-DD` (date only).
 - `createdAt`, `updatedAt`, and `completedAt` are ISO 8601 timestamps with offset (e.g., `2025-02-28T10:30:00Z`).
 
 ## Client Configuration
@@ -398,14 +339,16 @@ npm run inspector -- node dist/index.js
 
 ### Project structure
 
-```
+```text
 src/
-  index.ts   # MCP server entrypoint (stdio)
-  tools/     # Tool registrations
-  schemas/   # Zod input/output schemas
-  lib/       # Storage, matching, shared helpers
-tests/       # Unit tests
-docs/        # Assets (logo)
+  index.ts       # MCP server entrypoint (stdio)
+  tools.ts       # Tool registrations and handlers
+  schema.ts      # Zod input/output schemas
+  storage.ts     # JSON persistence and CRUD
+  responses.ts   # Tool response builders
+  diagnostics.ts # Node diagnostics channels
+tests/           # Unit tests
+docs/            # Assets (logo)
 ```
 
 ## Contributing
