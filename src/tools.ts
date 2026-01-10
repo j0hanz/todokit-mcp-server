@@ -34,11 +34,8 @@ import {
   CompleteTodoSchema,
   DefaultOutputSchema,
   DeleteTodoSchema,
-  IsoDateSchema,
   ListTodosFilterSchema,
-  PrioritySchema,
   StatusSchema,
-  TagSchema,
   type Todo,
   UpdateTodoSchema,
 } from './schema.js';
@@ -49,7 +46,6 @@ import {
   deleteTodoBySelector,
   deleteTodosByIds,
   getTodos,
-  normalizeTags,
   resolveTodoTargetFromTodos,
   type TodoUpdate,
   toResolveInput,
@@ -201,7 +197,6 @@ function buildAddTodosResponse(todos: Todo[]): CallToolResult {
 }
 
 const addTodoToolConfig = {
-  title: 'Add Todo',
   description: 'Add a new todo item',
   inputSchema: AddTodoSchema,
   outputSchema: DefaultOutputSchema,
@@ -212,11 +207,9 @@ const addTodoToolConfig = {
 };
 
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
-  const { title, description, priority, dueDate, tags } = input;
+  const { title, description } = input;
   try {
-    const todos = await addTodos([
-      { title, description, priority, dueDate, tags },
-    ]);
+    const todos = await addTodos([{ title, description }]);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     return createErrorResponse('E_ADD_TODO', getErrorMessage(err));
@@ -264,15 +257,11 @@ export function registerAddTodos(server: McpServer): void {
 }
 
 type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
-type SortBy = 'dueDate' | 'priority' | 'createdAt' | 'title';
+type SortBy = 'createdAt' | 'title';
 type SortOrder = 'asc' | 'desc';
 
 interface NormalizedFilters {
   completed?: boolean | undefined;
-  priority?: Todo['priority'] | undefined;
-  tag?: string | undefined;
-  dueBefore?: string | undefined;
-  dueAfter?: string | undefined;
   query?: string | undefined;
   sortBy: SortBy;
   order: SortOrder;
@@ -284,7 +273,6 @@ interface CountSummary {
   total: number;
   completed: number;
   pending: number;
-  overdue: number;
   isCreatedAtAsc: boolean;
   isCreatedAtDesc: boolean;
 }
@@ -297,37 +285,8 @@ interface OrderState {
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_OFFSET = 0;
-const PRIORITY_WEIGHT: Record<Todo['priority'], number> = {
-  low: 1,
-  normal: 2,
-  high: 3,
-};
-const MISSING_DUE_DATE = '9999-12-31';
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
-function getTodayIso(): string {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = pad2(now.getMonth() + 1);
-  const day = pad2(now.getDate());
-  return `${year}-${month}-${day}`;
-}
-
-function isOverdue(todo: Todo, todayIso: string): boolean {
-  if (!todo.dueDate) return false;
-  if (todo.completed) return false;
-  return todo.dueDate < todayIso;
-}
 
 const COMPARATORS: Record<SortBy, (a: Todo, b: Todo) => number> = {
-  dueDate: (a, b) =>
-    (a.dueDate ?? MISSING_DUE_DATE).localeCompare(
-      b.dueDate ?? MISSING_DUE_DATE
-    ),
-  priority: (a, b) => PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority],
   title: (a, b) => a.title.localeCompare(b.title),
   createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
 };
@@ -472,10 +431,6 @@ function resolveCompletedFilter(
 function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
   return {
     completed: resolveCompletedFilter(filters.status, filters.completed),
-    priority: filters.priority,
-    tag: filters.tag,
-    dueBefore: filters.dueBefore,
-    dueAfter: filters.dueAfter,
     query: filters.query,
     sortBy: filters.sortBy ?? 'createdAt',
     order: filters.order ?? 'asc',
@@ -484,23 +439,21 @@ function normalizeFilters(filters: ListTodosFilters): NormalizedFilters {
   };
 }
 
-function computeCounts(todos: readonly Todo[], todayIso: string): CountSummary {
+function computeCounts(todos: readonly Todo[]): CountSummary {
   const orderState = createOrderState();
   const totals = todos.reduce(
     (current, todo) => {
       current.completed += Number(todo.completed);
-      current.overdue += Number(isOverdue(todo, todayIso));
       updateOrderState(orderState, todo.createdAt);
       return current;
     },
-    { completed: 0, overdue: 0 }
+    { completed: 0 }
   );
   const total = todos.length;
   return {
     total,
     completed: totals.completed,
     pending: total - totals.completed,
-    overdue: totals.overdue,
     isCreatedAtAsc: orderState.isCreatedAtAsc,
     isCreatedAtDesc: orderState.isCreatedAtDesc,
   };
@@ -532,11 +485,9 @@ function buildSummary(counts: CountSummary, pageCount: number): string {
   if (counts.total === 0) {
     return 'No todos found';
   }
-  const overdueSuffix =
-    counts.overdue > 0 ? `, ${String(counts.overdue)} overdue` : '';
   return `Showing ${String(pageCount)} of ${String(counts.total)} todos (${String(
     counts.pending
-  )} pending, ${String(counts.completed)} completed${overdueSuffix}).`;
+  )} pending, ${String(counts.completed)} completed).`;
 }
 
 function paginateTodos(
@@ -573,7 +524,6 @@ function buildListResponse(
         total: counts.total,
         pending: counts.pending,
         completed: counts.completed,
-        overdue: counts.overdue,
       },
       limit: normalized.limit,
       offset: normalized.offset,
@@ -588,15 +538,10 @@ async function handleListTodos(
   const normalized = normalizeFilters(filters);
   const allTodos = await getTodos({
     completed: normalized.completed,
-    priority: normalized.priority,
-    tag: normalized.tag,
-    dueBefore: normalized.dueBefore,
-    dueAfter: normalized.dueAfter,
     query: normalized.query,
   });
 
-  const todayIso = getTodayIso();
-  const counts = computeCounts(allTodos, todayIso);
+  const counts = computeCounts(allTodos);
   const comparator = createTodoComparator(normalized.sortBy, normalized.order);
   const pageSize = normalized.offset + normalized.limit;
   const needsPartial = pageSize < allTodos.length;
@@ -640,94 +585,30 @@ type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 type UpdateFields = TodoUpdate;
 type ClearField = NonNullable<UpdateTodoInput['clearFields']>[number];
 
-function normalizeTagOps(tagOps: UpdateTodoInput['tagOps']): {
-  add: string[];
-  remove: Set<string>;
-} {
-  return {
-    add: normalizeTags(tagOps?.add ?? []),
-    remove: new Set(normalizeTags(tagOps?.remove ?? [])),
-  };
-}
-
-function getTagOps(tagOps?: UpdateTodoInput['tagOps']): {
-  add: string[];
-  remove: Set<string>;
-} | null {
-  if (!tagOps) return null;
-  const { add, remove } = normalizeTagOps(tagOps);
-  if (add.length === 0 && remove.size === 0) return null;
-  return { add, remove };
-}
-
-function mergeTags(
-  current: string[],
-  ops: { add: string[]; remove: Set<string> } | null
-): string[] {
-  const toAdd = ops?.add ?? [];
-  const toRemove = ops?.remove ?? new Set();
-  return normalizeTags([...current, ...toAdd]).filter((t) => !toRemove.has(t));
-}
-
-function resolveTags(
-  baseTags: string[],
-  clears: Set<ClearField>,
-  tagOps?: UpdateTodoInput['tagOps'],
-  newTags?: string[]
-): string[] | undefined {
-  if (newTags !== undefined) return newTags;
-
-  const shouldClear = clears.has('tags');
-  const ops = getTagOps(tagOps);
-
-  if (!shouldClear && !ops) return undefined;
-  return mergeTags(shouldClear ? [] : baseTags, ops);
-}
-
-function assignContentFields(
+function assignFields(
   updates: UpdateFields,
-  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
+  fields: Omit<UpdateTodoInput, 'clearFields'>
 ): void {
   if (fields.title !== undefined) updates.title = fields.title;
   if (fields.description !== undefined)
     updates.description = fields.description;
-}
-
-function assignStatusFields(
-  updates: UpdateFields,
-  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
-): void {
   if (fields.completed !== undefined) updates.completed = fields.completed;
-  if (fields.priority !== undefined) updates.priority = fields.priority;
-  if (fields.dueDate !== undefined) updates.dueDate = fields.dueDate;
-}
-
-function assignFields(
-  updates: UpdateFields,
-  fields: Omit<UpdateTodoInput, 'clearFields' | 'tagOps'>
-): void {
-  assignContentFields(updates, fields);
-  assignStatusFields(updates, fields);
 }
 
 function applyClears(updates: UpdateFields, clears: Set<ClearField>): void {
   if (clears.has('description')) updates.description = undefined;
-  if (clears.has('dueDate')) updates.dueDate = undefined;
 }
 
 function buildUpdatePayload(
-  baseTodo: Todo,
+  _baseTodo: Todo,
   input: UpdateTodoInput
 ): UpdateFields | null {
-  const { clearFields = [], tagOps, ...fields } = input;
+  const { clearFields = [], ...fields } = input;
   const clears = new Set(clearFields);
   const updates: UpdateFields = {};
 
   assignFields(updates, fields);
   applyClears(updates, clears);
-
-  const resolvedTags = resolveTags(baseTodo.tags, clears, tagOps, fields.tags);
-  if (resolvedTags !== undefined) updates.tags = resolvedTags;
 
   return Object.keys(updates).length > 0 ? updates : null;
 }
@@ -763,7 +644,7 @@ export function registerUpdateTodo(server: McpServer): void {
     'update_todo',
     {
       title: 'Update Todo',
-      description: 'Update fields on a todo item (supports search and tag ops)',
+      description: 'Update fields on a todo item',
       inputSchema: UpdateTodoSchema,
       outputSchema: DefaultOutputSchema,
       annotations: {
@@ -949,21 +830,8 @@ export function registerDeleteTodo(server: McpServer): void {
   );
 }
 
-type FilterKey =
-  | 'status'
-  | 'priority'
-  | 'tag'
-  | 'dueBefore'
-  | 'dueAfter'
-  | 'query';
-const FILTER_KEYS: FilterKey[] = [
-  'status',
-  'priority',
-  'tag',
-  'dueBefore',
-  'dueAfter',
-  'query',
-];
+type FilterKey = 'status' | 'query';
+const FILTER_KEYS: FilterKey[] = ['status', 'query'];
 
 function hasAtLeastOneFilter(v: Record<string, unknown>): boolean {
   return FILTER_KEYS.some((key) => v[key] !== undefined);
@@ -972,14 +840,6 @@ function hasAtLeastOneFilter(v: Record<string, unknown>): boolean {
 const DeleteTodosSchema = z
   .strictObject({
     status: StatusSchema.optional().describe('Filter by status'),
-    priority: PrioritySchema.optional().describe('Filter by priority'),
-    tag: TagSchema.optional().describe('Filter by tag'),
-    dueBefore: IsoDateSchema.optional().describe(
-      'Delete todos due before this date (ISO format)'
-    ),
-    dueAfter: IsoDateSchema.optional().describe(
-      'Delete todos due after this date (ISO format)'
-    ),
     query: z.string().min(1).max(200).optional().describe('Search text filter'),
     dryRun: z
       .boolean()
@@ -1068,10 +928,6 @@ async function handleDeleteTodos(
 
   const matches = await getTodos({
     completed: resolveDeleteCompletedFilter(input.status),
-    priority: input.priority,
-    tag: input.tag,
-    dueBefore: input.dueBefore,
-    dueAfter: input.dueAfter,
     query: input.query,
   });
 

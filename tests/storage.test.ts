@@ -6,7 +6,6 @@ import {
   addTodos,
   deleteTodoBySelector,
   getTodos,
-  normalizeTags,
   readFileIfExists,
   updateTodoBySelector,
 } from '../src/storage.js';
@@ -16,65 +15,36 @@ const TEST_TIMEOUT_MS = 5000;
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('generates uuid-like ids', async () => {
-    const [todo] = await addTodos([{ title: 'ID Check' }]);
+    const [todo] = await addTodos([{ title: 'ID Check', description: 'Test' }]);
     assert.ok(todo);
     assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
 
-  it('normalizes tags', () => {
-    assert.deepEqual(normalizeTags([' Work ', 'work', '', 'Home']), [
-      'work',
-      'home',
-    ]);
-  });
-
-  it('adds todos and filters by fields', async () => {
-    const [todoA, todoB] = await addTodos([
-      {
-        title: 'Alpha',
-        description: 'Alpha desc',
-        priority: 'high',
-        dueDate: '2025-01-10',
-        tags: ['Work'],
-      },
-      {
-        title: 'Beta',
-        priority: 'low',
-        dueDate: '2025-01-05',
-        tags: ['Home'],
-      },
-      { title: 'Gamma', priority: 'normal' },
+  it('adds todos and filters by query', async () => {
+    const [todoA, todoB, todoC] = await addTodos([
+      { title: 'Alpha', description: 'Alpha desc' },
+      { title: 'Beta', description: 'Beta desc' },
+      { title: 'Gamma', description: 'Gamma desc' },
     ]);
     assert.ok(todoA);
     assert.ok(todoB);
-
-    const byTag = await getTodos({ tag: 'work' });
-    assert.deepEqual(
-      byTag.map((todo) => todo.id),
-      [todoA.id]
-    );
-
-    const dueBefore = await getTodos({ dueBefore: '2025-01-08' });
-    assert.deepEqual(
-      dueBefore.map((todo) => todo.id),
-      [todoB.id]
-    );
-
-    const dueAfter = await getTodos({ dueAfter: '2025-01-08' });
-    assert.deepEqual(
-      dueAfter.map((todo) => todo.id),
-      [todoA.id]
-    );
+    assert.ok(todoC);
 
     const byQuery = await getTodos({ query: 'alpha desc' });
     assert.deepEqual(
       byQuery.map((todo) => todo.id),
       [todoA.id]
     );
+
+    const byTitle = await getTodos({ query: 'beta' });
+    assert.deepEqual(
+      byTitle.map((todo) => todo.id),
+      [todoB.id]
+    );
   });
 
-  it('updates todo completion and tags', async () => {
-    const [todo] = await addTodos([{ title: 'Delta' }]);
+  it('updates todo completion', async () => {
+    const [todo] = await addTodos([{ title: 'Delta', description: 'Test' }]);
     assert.ok(todo);
 
     const completed = await updateTodoBySelector({ id: todo.id }, () => ({
@@ -96,19 +66,10 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     }
     assert.equal(reopened.todo.completed, false);
     assert.equal(reopened.todo.completedAt, undefined);
-
-    const tagged = await updateTodoBySelector({ id: todo.id }, () => ({
-      tags: [' New ', 'NEW'],
-    }));
-    assert.equal(tagged.kind, 'match');
-    if (tagged.kind !== 'match') {
-      throw new Error('Expected todo match');
-    }
-    assert.deepEqual(tagged.todo.tags, ['new']);
   });
 
   it('deletes todos', async () => {
-    const [todo] = await addTodos([{ title: 'Epsilon' }]);
+    const [todo] = await addTodos([{ title: 'Epsilon', description: 'Test' }]);
     assert.ok(todo);
     const deleted = await deleteTodoBySelector({ id: todo.id });
     assert.equal(deleted.kind, 'match');
@@ -122,8 +83,11 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('serializes concurrent writes', async () => {
     const count = 25;
-    const titles = Array.from({ length: count }, (_, index) => `Task ${index}`);
-    await Promise.all(titles.map((title) => addTodos([{ title }])));
+    const items = Array.from({ length: count }, (_, index) => ({
+      title: `Task ${index}`,
+      description: 'Concurrent test',
+    }));
+    await Promise.all(items.map((item) => addTodos([item])));
     const todos = await getTodos();
     assert.equal(todos.length, count);
   });

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodos, getTodos, updateTodoBySelector } from '../src/storage.js';
+import { addTodos, getTodos } from '../src/storage.js';
 import {
   registerAddTodo,
   registerAddTodos,
@@ -93,50 +93,46 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(todos.length, 3);
   });
 
-  it('lists todos with counts and sorting', async (t) => {
+  it('lists todos with counts and sorting', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
 
-    t.mock.timers.enable({
-      apis: ['Date'],
-      now: new Date('2025-01-10T00:00:00Z'),
+    const [alpha, beta] = await addTodos([
+      { title: 'Alpha', description: 'Alpha task' },
+      { title: 'Beta', description: 'Beta task' },
+    ]);
+    assert.ok(alpha);
+    assert.ok(beta);
+
+    const listHandler = getHandler<{ sortBy: string; order: string }>(
+      'list_todos'
+    );
+    const result = await listHandler({ sortBy: 'title', order: 'asc' });
+    const structured = getStructured(result)?.result as Record<string, unknown>;
+
+    assert.deepEqual(structured.counts, {
+      total: 2,
+      pending: 2,
+      completed: 0,
     });
-
-    try {
-      await addTodos([
-        { title: 'Alpha', priority: 'high', dueDate: '2025-01-05' },
-        { title: 'Beta', priority: 'low', dueDate: '2025-01-12' },
-      ]);
-
-      const listHandler = getHandler<{ sortBy: string; order: string }>(
-        'list_todos'
-      );
-      const result = await listHandler({ sortBy: 'priority', order: 'desc' });
-      const structured = getStructured(result)?.result as Record<
-        string,
-        unknown
-      >;
-
-      assert.deepEqual(structured.counts, {
-        total: 2,
-        pending: 2,
-        completed: 0,
-        overdue: 1,
-      });
-    } finally {
-      t.mock.timers.reset();
-    }
+    const titles = (structured.items as { title: string }[]).map(
+      (item) => item.title
+    );
+    assert.deepEqual(titles, ['Alpha', 'Beta']);
   });
 
-  it('lists todos with limit using priority sort', async () => {
+  it('lists todos with limit using createdAt sort', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
 
-    await addTodos([
-      { title: 'Low', priority: 'low' },
-      { title: 'High', priority: 'high' },
-      { title: 'Normal', priority: 'normal' },
+    const [first, second, third] = await addTodos([
+      { title: 'First', description: 'First task' },
+      { title: 'Second', description: 'Second task' },
+      { title: 'Third', description: 'Third task' },
     ]);
+    assert.ok(first);
+    assert.ok(second);
+    assert.ok(third);
 
     const listHandler = getHandler<{
       sortBy: string;
@@ -144,15 +140,15 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       limit: number;
     }>('list_todos');
     const result = await listHandler({
-      sortBy: 'priority',
-      order: 'desc',
+      sortBy: 'title',
+      order: 'asc',
       limit: 2,
     });
     const structured = getStructured(result)?.result as Record<string, unknown>;
     const titles = (structured.items as { title: string }[]).map(
       (item) => item.title
     );
-    assert.deepEqual(titles, ['High', 'Normal']);
+    assert.deepEqual(titles, ['First', 'Second']);
   });
 
   it('lists empty results with summary', async () => {
@@ -168,23 +164,23 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       total: 0,
       pending: 0,
       completed: 0,
-      overdue: 0,
     });
   });
 
   it('filters by completed status', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
+    registerCompleteTodo(server);
 
     const [pending, completed] = await addTodos([
-      { title: 'Pending' },
-      { title: 'Completed' },
+      { title: 'Pending', description: 'Test' },
+      { title: 'Completed', description: 'Test' },
     ]);
     assert.ok(pending);
     assert.ok(completed);
-    await updateTodoBySelector({ id: completed.id }, () => ({
-      completed: true,
-    }));
+
+    const completeHandler = getHandler<{ id: string }>('complete_todo');
+    await completeHandler({ id: completed.id });
 
     const listHandler = getHandler<{ status: string }>('list_todos');
 
@@ -215,16 +211,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerCompleteTodo(server);
     registerDeleteTodo(server);
 
-    const [todo] = await addTodos([{ title: 'Manage' }]);
+    const [todo] = await addTodos([{ title: 'Manage', description: 'Test' }]);
     assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
-      tagOps?: { add?: string[] };
+      title?: string;
     }>('update_todo');
     const updateResult = await updateHandler({
       id: todo.id,
-      tagOps: { add: ['Work'] },
+      title: 'Updated Title',
     });
     assert.equal(getStructured(updateResult)?.ok, true);
 
@@ -242,26 +238,18 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerUpdateTodo(server);
 
     const [todo] = await addTodos([
-      {
-        title: 'Update Me',
-        description: 'Has description',
-        priority: 'normal',
-        dueDate: '2025-02-01',
-        tags: ['alpha', 'beta'],
-      },
+      { title: 'Update Me', description: 'Has description' },
     ]);
     assert.ok(todo);
 
     const updateHandler = getHandler<{
       id: string;
       clearFields?: string[];
-      tagOps?: { add?: string[]; remove?: string[] };
     }>('update_todo');
 
     const updateResult = await updateHandler({
       id: todo.id,
-      clearFields: ['description', 'dueDate'],
-      tagOps: { add: ['gamma'], remove: ['beta'] },
+      clearFields: ['description'],
     });
     assert.equal(getStructured(updateResult)?.ok, true);
 
@@ -274,7 +262,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerCompleteTodo(server);
 
-    const [todo] = await addTodos([{ title: 'Finish Me' }]);
+    const [todo] = await addTodos([
+      { title: 'Finish Me', description: 'Test' },
+    ]);
     assert.ok(todo);
     const completeHandler = getHandler<{ id: string; completed?: boolean }>(
       'complete_todo'
@@ -314,9 +304,9 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerDeleteTodos(server);
 
     await addTodos([
-      { title: 'Keep Me' },
-      { title: 'Batch One' },
-      { title: 'Batch Two' },
+      { title: 'Keep Me', description: 'Test' },
+      { title: 'Batch One', description: 'Test' },
+      { title: 'Batch Two', description: 'Test' },
     ]);
 
     const deleteHandler = getHandler<{
@@ -352,7 +342,10 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerDeleteTodo(server);
 
-    await addTodos([{ title: 'Shared Item' }, { title: 'Shared Item Two' }]);
+    await addTodos([
+      { title: 'Shared Item', description: 'Test' },
+      { title: 'Shared Item Two', description: 'Test' },
+    ]);
 
     const deleteHandler = getHandler<{ query: string; dryRun: boolean }>(
       'delete_todo'

@@ -15,14 +15,18 @@ const TEST_TIMEOUT_MS = 5000;
 
 describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
   it('rejects unknown fields on add', () => {
-    const result = AddTodoSchema.safeParse({ title: 'Test', extra: 'nope' });
+    const result = AddTodoSchema.safeParse({
+      title: 'Test',
+      description: 'Test desc',
+      extra: 'nope',
+    });
     assert.equal(result.success, false);
   });
 
-  it('rejects unknown fields on nested tagOps', () => {
+  it('rejects unknown fields on update', () => {
     const result = UpdateTodoSchema.safeParse({
       id: '1',
-      tagOps: { add: ['tag'], extra: 'nope' },
+      extra: 'nope',
     });
     assert.equal(result.success, false);
   });
@@ -38,8 +42,6 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
         id: '1',
         title: 'Bad timestamp',
         completed: false,
-        priority: 'normal',
-        tags: [],
         createdAt: 'not-iso',
       },
     ]);
@@ -52,8 +54,6 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
         id: '1',
         title: 'Extra field',
         completed: false,
-        priority: 'normal',
-        tags: [],
         createdAt: '2025-02-28T10:30:00Z',
         extra: 'nope',
       },

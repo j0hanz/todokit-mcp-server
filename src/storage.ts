@@ -283,55 +283,11 @@ export async function closeDb(): Promise<void> {
 
 export interface TodoFilters {
   completed?: boolean | undefined;
-  priority?: 'low' | 'normal' | 'high' | undefined;
-  tag?: string | undefined;
-  dueBefore?: string | undefined;
-  dueAfter?: string | undefined;
   query?: string | undefined;
-}
-
-function normalizeTag(tag: string): string {
-  return tag.trim().toLowerCase();
-}
-
-export function normalizeTags(tags: string[]): string[] {
-  const normalized = tags
-    .map((tag) => normalizeTag(tag))
-    .filter((tag) => tag.length > 0);
-  return Array.from(new Set(normalized));
 }
 
 function matchesCompleted(todo: Todo, completed?: boolean): boolean {
   return completed === undefined || todo.completed === completed;
-}
-
-function matchesPriority(todo: Todo, priority?: string): boolean {
-  return !priority || todo.priority === priority;
-}
-
-function matchesTag(todo: Todo, tag?: string): boolean {
-  return !tag || todo.tags.includes(tag);
-}
-
-function matchesBasic(todo: Todo, filters: TodoFilters, tag?: string): boolean {
-  return (
-    matchesCompleted(todo, filters.completed) &&
-    matchesPriority(todo, filters.priority) &&
-    matchesTag(todo, tag)
-  );
-}
-
-function matchesDueDateRange(
-  todo: Todo,
-  dueBefore?: string,
-  dueAfter?: string
-): boolean {
-  if (!dueBefore && !dueAfter) return true;
-  const { dueDate } = todo;
-  if (!dueDate) return false;
-  if (dueBefore && dueDate >= dueBefore) return false;
-  if (dueAfter && dueDate <= dueAfter) return false;
-  return true;
 }
 
 function matchesQuery(todo: Todo, query?: string): boolean {
@@ -339,7 +295,7 @@ function matchesQuery(todo: Todo, query?: string): boolean {
 
   if (todo.title.toLowerCase().includes(query)) return true;
   if (todo.description?.toLowerCase().includes(query)) return true;
-  return todo.tags.some((tag) => tag.toLowerCase().includes(query));
+  return false;
 }
 
 export function filterTodos(
@@ -347,21 +303,16 @@ export function filterTodos(
   filters: TodoFilters
 ): readonly Todo[] {
   const query = filters.query?.trim().toLowerCase();
-  const tag = filters.tag ? normalizeTag(filters.tag) : undefined;
 
   return todos.filter(
     (todo) =>
-      matchesBasic(todo, filters, tag) &&
-      matchesDueDateRange(todo, filters.dueBefore, filters.dueAfter) &&
-      matchesQuery(todo, query)
+      matchesCompleted(todo, filters.completed) && matchesQuery(todo, query)
   );
 }
 
 export interface TodoMatchPreview {
   id: string;
   title: string;
-  priority: Todo['priority'];
-  dueDate?: string;
   completed: boolean;
 }
 
@@ -374,9 +325,7 @@ function buildMatchPreviews(
   return todos.slice(0, limit).map((todo) => ({
     id: todo.id,
     title: todo.title,
-    priority: todo.priority,
     completed: todo.completed,
-    ...(todo.dueDate === undefined ? {} : { dueDate: todo.dueDate }),
   }));
 }
 
@@ -506,10 +455,7 @@ export function resolveTodoTargetFromTodos(
 }
 
 export type TodoUpdate = Partial<
-  Pick<
-    Todo,
-    'title' | 'description' | 'completed' | 'priority' | 'dueDate' | 'tags'
-  >
+  Pick<Todo, 'title' | 'description' | 'completed'>
 >;
 
 export function createNotFoundOutcome(id: string): MatchOutcome {
@@ -528,15 +474,7 @@ export type CompleteTodoOutcome =
 
 interface NewTodoInput {
   title: string;
-  description?: string | undefined;
-  priority?: 'low' | 'normal' | 'high' | undefined;
-  dueDate?: string | undefined;
-  tags?: string[] | undefined;
-}
-
-function normalizeUpdates(updates: TodoUpdate): TodoUpdate {
-  if (!updates.tags) return updates;
-  return { ...updates, tags: normalizeTags(updates.tags) };
+  description: string;
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
@@ -583,9 +521,6 @@ function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
     title: item.title,
     description: item.description,
     completed: false,
-    priority: item.priority ?? 'normal',
-    dueDate: item.dueDate,
-    tags: normalizeTags(item.tags ?? []),
     createdAt: timestamp,
     updatedAt: timestamp,
     completedAt: undefined,
@@ -631,11 +566,10 @@ function applyUpdateToTodos(
   if (!current) {
     return { todos, result: null };
   }
-  const normalizedUpdates = normalizeUpdates(updates);
-  if (!hasChanges(current, normalizedUpdates)) {
+  if (!hasChanges(current, updates)) {
     return { todos, result: current };
   }
-  const updatedTodo = calculateUpdatedTodo(current, normalizedUpdates);
+  const updatedTodo = calculateUpdatedTodo(current, updates);
   return { todos: todos.with(index, updatedTodo), result: updatedTodo };
 }
 

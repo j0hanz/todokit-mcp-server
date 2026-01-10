@@ -59,9 +59,6 @@ export interface Todo {
   title: string;
   description?: string | undefined;
   completed: boolean;
-  priority: 'low' | 'normal' | 'high';
-  dueDate?: string | undefined;
-  tags: string[];
   createdAt: string;
   updatedAt?: string | undefined;
   completedAt?: string | undefined;
@@ -72,9 +69,6 @@ const TodoSchema: ZodType<Todo> = z.strictObject({
   title: z.string(),
   description: z.string().optional(),
   completed: z.boolean(),
-  priority: z.enum(['low', 'normal', 'high']).default('normal'),
-  dueDate: IsoDateSchema.optional(),
-  tags: z.array(z.string()).default([]),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema.optional(),
   completedAt: IsoDateTimeSchema.optional(),
@@ -82,18 +76,14 @@ const TodoSchema: ZodType<Todo> = z.strictObject({
 
 export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
 
-type Priority = 'low' | 'normal' | 'high';
 type Status = 'pending' | 'completed' | 'all';
-type SortBy = 'dueDate' | 'priority' | 'createdAt' | 'title';
+type SortBy = 'createdAt' | 'title';
 type SortOrder = 'asc' | 'desc';
-type ClearField = 'description' | 'dueDate' | 'tags';
+type ClearField = 'description';
 
 interface TodoInput {
   title: string;
-  description?: string | undefined;
-  priority?: Priority | undefined;
-  dueDate?: string | undefined;
-  tags?: string[] | undefined;
+  description: string;
 }
 
 interface AddTodosInput {
@@ -117,20 +107,11 @@ type CompleteTodoInput = (SelectorById | SelectorByQuery) & {
   completed?: boolean | undefined;
 };
 
-interface TagOpsInput {
-  add?: string[] | undefined;
-  remove?: string[] | undefined;
-}
-
 interface UpdateTodoFieldsInput {
   title?: string | undefined;
   description?: string | undefined;
   completed?: boolean | undefined;
-  priority?: Priority | undefined;
-  dueDate?: string | undefined;
-  tags?: string[] | undefined;
   clearFields?: ClearField[] | undefined;
-  tagOps?: TagOpsInput | undefined;
 }
 
 type UpdateTodoInput = (SelectorById | SelectorByQuery) & UpdateTodoFieldsInput;
@@ -139,10 +120,6 @@ interface ListTodosFilterInput {
   completed?: boolean | undefined;
   status?: Status | undefined;
   query?: string | undefined;
-  priority?: Priority | undefined;
-  tag?: string | undefined;
-  dueBefore?: string | undefined;
-  dueAfter?: string | undefined;
   sortBy?: SortBy | undefined;
   order?: SortOrder | undefined;
   limit?: number | undefined;
@@ -169,28 +146,13 @@ interface SelectorSchemas {
   byQuery: SelectorByQuerySchema;
 }
 
-export const TagSchema = z.string().min(1).max(50);
-export const PrioritySchema: ZodType<Priority> = z.enum([
-  'low',
-  'normal',
-  'high',
-]);
 export const StatusSchema: ZodType<Status> = z.enum([
   'pending',
   'completed',
   'all',
 ]);
-const ClearFieldSchema: ZodType<ClearField> = z.enum([
-  'description',
-  'dueDate',
-  'tags',
-]);
-const SortBySchema: ZodType<SortBy> = z.enum([
-  'dueDate',
-  'priority',
-  'createdAt',
-  'title',
-]);
+const ClearFieldSchema: ZodType<ClearField> = z.enum(['description']);
+const SortBySchema: ZodType<SortBy> = z.enum(['createdAt', 'title']);
 const SortOrderSchema: ZodType<SortOrder> = z.enum(['asc', 'desc']);
 
 function buildSelectorSchemas(
@@ -210,22 +172,7 @@ function buildSelectorSchemas(
 }
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   title: z.string().min(1).max(200).describe('The title of the todo'),
-  description: z
-    .string()
-    .max(2000)
-    .optional()
-    .describe('Optional description of the todo'),
-  priority: PrioritySchema.optional().describe(
-    'Priority level (default: normal)'
-  ),
-  dueDate: IsoDateSchema.optional().describe(
-    'Due date in ISO format (YYYY-MM-DD)'
-  ),
-  tags: z
-    .array(TagSchema)
-    .max(50)
-    .optional()
-    .describe('Tags for categorization'),
+  description: z.string().min(1).max(2000).describe('Description of the todo'),
 });
 
 export const AddTodoSchema: ZodType<TodoInput> = TodoInputSchema;
@@ -270,11 +217,6 @@ export const CompleteTodoSchema: ZodType<CompleteTodoInput> = z.union([
   completeTodoSelector.byQuery.extend(CompleteTodoFields),
 ]);
 
-const TagOpsSchema: ZodType<TagOpsInput> = z.strictObject({
-  add: z.array(TagSchema).max(50).optional().describe('Tags to add'),
-  remove: z.array(TagSchema).max(50).optional().describe('Tags to remove'),
-});
-
 const updateTodoSelector = buildSelectorSchemas(
   'The ID of the todo to update',
   'Search text to find a single todo to update'
@@ -284,15 +226,11 @@ const UpdateTodoFieldsSchema = {
   title: z.string().min(1).max(200).optional().describe('New title'),
   description: z.string().max(2000).optional().describe('New description'),
   completed: z.boolean().optional().describe('Completion status'),
-  priority: PrioritySchema.optional().describe('New priority level'),
-  dueDate: IsoDateSchema.optional().describe('New due date (ISO format)'),
-  tags: z.array(TagSchema).max(50).optional().describe('New tags'),
   clearFields: z
     .array(ClearFieldSchema)
-    .max(3)
+    .max(1)
     .optional()
     .describe('Fields to clear'),
-  tagOps: TagOpsSchema.optional().describe('Tag modifications to apply'),
 };
 
 export const UpdateTodoSchema: ZodType<UpdateTodoInput> = z.union([
@@ -312,15 +250,7 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       .min(1)
       .max(200)
       .optional()
-      .describe('Search text in title, description, or tags'),
-    priority: PrioritySchema.optional().describe('Filter by priority level'),
-    tag: TagSchema.optional().describe('Filter by tag (must contain)'),
-    dueBefore: IsoDateSchema.optional().describe(
-      'Filter todos due before this date (ISO format)'
-    ),
-    dueAfter: IsoDateSchema.optional().describe(
-      'Filter todos due after this date (ISO format)'
-    ),
+      .describe('Search text in title or description'),
     sortBy: SortBySchema.optional().describe('Sort results by field'),
     order: SortOrderSchema.optional().describe('Sort order (default: asc)'),
     limit: z

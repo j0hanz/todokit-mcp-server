@@ -23,7 +23,7 @@ describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('resolves by id', async () => {
-    const [todo] = await addTodos([{ title: 'Match A' }]);
+    const [todo] = await addTodos([{ title: 'Match A', description: 'Test' }]);
     assert.ok(todo);
     const result = await resolveTodoTarget({ id: todo.id });
     assert.equal(result.kind, 'match');
@@ -41,7 +41,10 @@ describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('returns ambiguous for multiple matches', async () => {
-    await addTodos([{ title: 'Shared Task' }, { title: 'Shared Task Two' }]);
+    await addTodos([
+      { title: 'Shared Task', description: 'Test' },
+      { title: 'Shared Task Two', description: 'Test' },
+    ]);
 
     const result = await resolveTodoTarget({ query: 'Shared' });
     assert.equal(result.kind, 'ambiguous');
