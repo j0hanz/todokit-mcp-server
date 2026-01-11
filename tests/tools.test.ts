@@ -42,6 +42,14 @@ function createToolHarness() {
     },
   } as McpServer;
 
+  const getConfig = (name: string): unknown => {
+    const tool = tools.get(name);
+    if (!tool) {
+      throw new Error(`Missing handler for ${name}`);
+    }
+    return tool.config;
+  };
+
   const getHandler = <T>(name: string): ToolHandler<T> => {
     const tool = tools.get(name);
     if (!tool) {
@@ -85,7 +93,7 @@ function createToolHarness() {
     }) as ToolHandler<T>;
   };
 
-  return { server, getHandler };
+  return { server, getHandler, getConfig };
 }
 
 function getStructured(result: CallToolResult) {
@@ -379,5 +387,18 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
     const structured = getStructured(result);
     assert.equal(structured?.ok, false);
+  });
+
+  it('delete_todo is not marked idempotent', () => {
+    const { server, getConfig } = createToolHarness();
+    registerDeleteTodo(server);
+
+    const config = getConfig('delete_todo');
+    assert.equal(
+      isRecord(config) &&
+        isRecord(config.annotations) &&
+        config.annotations.idempotentHint,
+      false
+    );
   });
 });

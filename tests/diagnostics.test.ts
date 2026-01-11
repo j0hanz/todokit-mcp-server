@@ -148,4 +148,40 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
       unsubscribe('todokit:tool', onTool);
     }
   });
+
+  it('publishes tool_result on synchronous handler throw', async () => {
+    const toolEvents: unknown[] = [];
+
+    const onTool = (message: unknown): void => {
+      toolEvents.push(message);
+    };
+
+    subscribe('todokit:tool', onTool);
+
+    try {
+      const { server, getHandler } = createToolHarness();
+      registerToolWithDiagnostics(
+        server,
+        'sync_fail_tool',
+        { title: 'Sync Fail Tool', inputSchema: z.strictObject({}) },
+        () => {
+          throw new Error('boom');
+        }
+      );
+
+      const handler = getHandler<Record<string, never>>('sync_fail_tool');
+      await assert.rejects(() => handler({}), /boom/);
+
+      assert.ok(
+        toolEvents.some((event) => {
+          if (!isRecord(event)) return false;
+          return (
+            event.kind === 'tool_result' && event.tool === 'sync_fail_tool'
+          );
+        })
+      );
+    } finally {
+      unsubscribe('todokit:tool', onTool);
+    }
+  });
 });

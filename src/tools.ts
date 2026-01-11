@@ -128,7 +128,16 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     const requestId = randomUUID();
     publishToolCallWithId(tool, input, requestId);
     const start = nowMs();
-    const result = handler(input, extra);
+    let result: CallToolResult | Promise<CallToolResult>;
+    try {
+      result = handler(input, extra);
+    } catch (error: unknown) {
+      publishFailureResult(tool, requestId, start);
+      const rejection =
+        error instanceof Error ? error : new Error(String(error));
+      return Promise.reject(rejection);
+    }
+
     return Promise.resolve(result)
       .then((resolved) => {
         publishSuccessResult(tool, requestId, start, resolved);
@@ -490,7 +499,7 @@ export function registerDeleteTodo(server: McpServer): void {
       outputSchema: DefaultOutputSchema,
       annotations: {
         readOnlyHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         destructiveHint: true,
       },
     },

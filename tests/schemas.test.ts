@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   AddTodoSchema,
+  DefaultOutputSchema,
   DeleteTodoSchema,
   IsoDateSchema,
   IsoDateTimeSchema,
@@ -57,6 +58,14 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
         extra: 'nope',
       },
     ]);
+    assert.equal(result.success, false);
+  });
+
+  it('rejects unknown fields in output error shape', () => {
+    const result = DefaultOutputSchema.safeParse({
+      ok: false,
+      error: { code: 'E_TEST', message: 'Test', extra: 'nope' },
+    });
     assert.equal(result.success, false);
   });
 
