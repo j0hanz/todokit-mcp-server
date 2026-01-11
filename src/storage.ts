@@ -785,10 +785,15 @@ export async function completeTodoBySelector(
 export function deleteTodosByIds(ids: string[]): Promise<string[]> {
   const idsToDelete = new Set(ids);
   return withTodos((todos) => {
-    const remaining = todos.filter((todo) => !idsToDelete.has(todo.id));
-    const deletedIds = todos
-      .filter((todo) => idsToDelete.has(todo.id))
-      .map((todo) => todo.id);
+    const remaining: Todo[] = [];
+    const deletedIds: string[] = [];
+    for (const todo of todos) {
+      if (idsToDelete.has(todo.id)) {
+        deletedIds.push(todo.id);
+      } else {
+        remaining.push(todo);
+      }
+    }
     return { todos: remaining, result: deletedIds };
   });
 }

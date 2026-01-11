@@ -285,7 +285,10 @@ interface CountSummary {
 }
 
 function computeCounts(todos: readonly Todo[]): CountSummary {
-  const completed = todos.filter((t) => t.completed).length;
+  let completed = 0;
+  for (const todo of todos) {
+    if (todo.completed) completed += 1;
+  }
   return {
     total: todos.length,
     completed,
