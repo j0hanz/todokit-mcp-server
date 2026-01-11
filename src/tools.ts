@@ -526,7 +526,7 @@ export function registerClearTodos(server: McpServer): void {
     {
       title: 'Clear All Todos',
       description: 'Delete all todos from the list',
-      inputSchema: z.object({}),
+      inputSchema: z.strictObject({}),
       outputSchema: DefaultOutputSchema,
       annotations: {
         readOnlyHint: false,

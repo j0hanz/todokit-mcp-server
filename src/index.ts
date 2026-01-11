@@ -4,15 +4,7 @@ import { parseArgs } from 'node:util';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  type CallToolResult,
-  ErrorCode,
-  type InitializeRequest,
-  InitializeRequestSchema,
-  type InitializeResult,
-  McpError,
-  SUPPORTED_PROTOCOL_VERSIONS,
-} from '@modelcontextprotocol/sdk/types.js';
+import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 import {
@@ -142,14 +134,16 @@ let shuttingDown = false;
 let activeServer: McpServer | null = null;
 let disableDiagnostics: (() => void) | null = null;
 
-type InitializeHandler = (
-  request: InitializeRequest
-) => InitializeResult | Promise<InitializeResult>;
-
 function mapToolErrorCode(message: string): string {
   if (message.startsWith('Input validation error')) return 'E_INVALID_PARAMS';
-  if (message.includes('not found')) return 'E_TOOL_NOT_FOUND';
-  if (message.includes('disabled')) return 'E_TOOL_DISABLED';
+  if (message.startsWith('Invalid tools/call request'))
+    return 'E_INVALID_PARAMS';
+  if (message.startsWith('Invalid task creation result'))
+    return 'E_OUTPUT_INVALID';
+  if (message.startsWith('Tool ') && message.includes(' not found'))
+    return 'E_TOOL_NOT_FOUND';
+  if (message.startsWith('Tool ') && message.includes(' disabled'))
+    return 'E_TOOL_DISABLED';
   if (message.startsWith('Output validation error')) return 'E_OUTPUT_INVALID';
   return 'E_TOOL_ERROR';
 }
@@ -158,40 +152,25 @@ function patchToolErrorResponses(server: McpServer): void {
   const target = server as unknown as {
     createToolError?: (message: string) => CallToolResult;
   };
-  target.createToolError = (message: string): CallToolResult => {
-    const structured = {
-      ok: false,
-      error: { code: mapToolErrorCode(message), message },
-    };
-    return {
-      content: [{ type: 'text', text: JSON.stringify(structured) }],
-      structuredContent: structured,
-      isError: true,
-    };
-  };
-}
+  if (typeof target.createToolError !== 'function') {
+    return;
+  }
 
-function enforceProtocolVersion(server: McpServer): void {
-  const internalServer = server.server as unknown as {
-    _oninitialize?: InitializeHandler;
-    setRequestHandler: typeof server.server.setRequestHandler;
-  };
-  const onInitialize = internalServer._oninitialize;
-  if (!onInitialize) return;
-  const boundOnInitialize = onInitialize.bind(server.server);
-  internalServer.setRequestHandler(
-    InitializeRequestSchema,
-    (request: InitializeRequest) => {
-      const requested = request.params.protocolVersion;
-      if (!SUPPORTED_PROTOCOL_VERSIONS.includes(requested)) {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Unsupported protocol version: ${requested}`
-        );
-      }
-      return boundOnInitialize(request);
-    }
-  );
+  try {
+    target.createToolError = (message: string): CallToolResult => {
+      const structured = {
+        ok: false,
+        error: { code: mapToolErrorCode(message), message },
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured) }],
+        structuredContent: structured,
+        isError: true,
+      };
+    };
+  } catch {
+    // Best-effort override; fall back to SDK defaults if not writable.
+  }
 }
 
 export function createServer(): McpServer {
@@ -203,7 +182,6 @@ export function createServer(): McpServer {
     }
   );
 
-  enforceProtocolVersion(server);
   patchToolErrorResponses(server);
   registerAllTools(server);
   return server;
@@ -288,7 +266,7 @@ if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
     const logger = createStderrLogger(cli.logLevel);
     disableDiagnostics = enableDefaultDiagnosticsSubscribers({
       logger: (line: string): void => {
-        logger.debug(line);
+        logger.info(line);
       },
     });
   }

@@ -29,21 +29,60 @@ type StructuredResult = {
   };
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function createToolHarness() {
-  const handlers = new Map<string, unknown>();
+  const tools = new Map<string, { config: unknown; handler: unknown }>();
   const server = {
-    registerTool(name: string, _config: unknown, handler: unknown) {
-      handlers.set(name, handler);
+    registerTool(name: string, config: unknown, handler: unknown) {
+      tools.set(name, { config, handler });
       return {} as unknown;
     },
   } as McpServer;
 
   const getHandler = <T>(name: string): ToolHandler<T> => {
-    const handler = handlers.get(name);
-    if (!handler) {
+    const tool = tools.get(name);
+    if (!tool) {
       throw new Error(`Missing handler for ${name}`);
     }
-    return handler as ToolHandler<T>;
+
+    return (async (input: T) => {
+      if (isRecord(tool.config) && 'inputSchema' in tool.config) {
+        const schema = (tool.config as { inputSchema?: unknown }).inputSchema;
+        if (
+          schema &&
+          typeof (schema as { safeParse?: unknown }).safeParse === 'function'
+        ) {
+          const parsed = (
+            schema as {
+              safeParse: (value: unknown) => {
+                success: boolean;
+                data?: unknown;
+                error?: unknown;
+              };
+            }
+          ).safeParse(input);
+          if (!parsed.success) {
+            throw new Error('Input validation error');
+          }
+          return (
+            tool.handler as (
+              value: unknown,
+              extra?: unknown
+            ) => Promise<CallToolResult>
+          )(parsed.data, {});
+        }
+      }
+
+      return (
+        tool.handler as (
+          value: unknown,
+          extra?: unknown
+        ) => Promise<CallToolResult>
+      )(input, {});
+    }) as ToolHandler<T>;
   };
 
   return { server, getHandler };
@@ -93,7 +132,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(todos.length, 3);
   });
 
-  it('lists todos with counts and sorting', async () => {
+  it('lists todos with counts', async () => {
     const { server, getHandler } = createToolHarness();
     registerListTodos(server);
 
@@ -104,10 +143,8 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.ok(alpha);
     assert.ok(beta);
 
-    const listHandler = getHandler<{ sortBy: string; order: string }>(
-      'list_todos'
-    );
-    const result = await listHandler({ sortBy: 'createdAt', order: 'asc' });
+    const listHandler = getHandler<Record<string, never>>('list_todos');
+    const result = await listHandler({});
     const structured = getStructured(result)?.result as Record<string, unknown>;
 
     assert.deepEqual(structured.counts, {
@@ -119,6 +156,14 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       (item) => item.description
     );
     assert.deepEqual(descriptions, ['Alpha task', 'Beta task']);
+  });
+
+  it('clear_todos rejects unknown fields', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerClearTodos(server);
+
+    const deleteHandler = getHandler<unknown>('clear_todos');
+    await assert.rejects(() => deleteHandler({ unexpected: 1 }));
   });
 
   it('lists all todos when no filter specified', async () => {

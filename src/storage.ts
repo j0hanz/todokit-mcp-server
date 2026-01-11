@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
@@ -145,11 +144,11 @@ export async function writeFileAtomic(
   }
 }
 
-const moduleDir = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TODO_FILE = join(moduleDir, '../todos.json');
+const DEFAULT_TODO_FILE = resolve(process.cwd(), 'todos.json');
 
 const IO_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 30_000;
+const MAX_CONFLICT_RETRIES = 3;
 
 function getJsonIndentation(): number {
   const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
@@ -254,15 +253,31 @@ export async function withTodos<T>(
 ): Promise<T> {
   return enqueueWrite(async () => {
     const path = getTodoFilePath();
-    const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
-    const current =
-      cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
-    cache = { todos: current, mtimeMs };
-    const { todos, result } = mutate(current);
-    if (todos !== current) {
-      await saveTodos(path, todos);
+    for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
+      const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
+      const current =
+        cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
+      cache = { todos: current, mtimeMs };
+
+      const { todos, result } = mutate(current);
+      const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
+      if (latestMtime !== mtimeMs) {
+        if (attempt >= MAX_CONFLICT_RETRIES) {
+          throw new Error('Todo storage changed during update; please retry.');
+        }
+        await delay(25 * (attempt + 1));
+        continue;
+      }
+
+      if (todos !== current) {
+        await saveTodos(path, todos);
+      }
+      return result;
     }
-    return result;
+
+    throw new Error(
+      'Todo storage update failed due to concurrent modifications'
+    );
   });
 }
 
