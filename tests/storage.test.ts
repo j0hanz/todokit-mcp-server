@@ -123,4 +123,62 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
         String(error.message).includes('File read timed out')
     );
   });
+
+  it('rejects oversized todo storage files', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const previous = process.env.TODOKIT_MAX_TODO_FILE_BYTES;
+    process.env.TODOKIT_MAX_TODO_FILE_BYTES = '10';
+
+    try {
+      await writeFile(
+        todoFile,
+        JSON.stringify([{ id: 'x' }]) + 'x'.repeat(100),
+        {
+          encoding: 'utf8',
+        }
+      );
+
+      await assert.rejects(
+        () => getTodos(),
+        (error: unknown) =>
+          error instanceof Error &&
+          (error as unknown as { code?: unknown }).code ===
+            'E_STORAGE_TOO_LARGE'
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TODOKIT_MAX_TODO_FILE_BYTES;
+      } else {
+        process.env.TODOKIT_MAX_TODO_FILE_BYTES = previous;
+      }
+    }
+  });
+
+  it('fails fast when a write lock is held', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const previous = process.env.TODOKIT_LOCK_TIMEOUT_MS;
+    process.env.TODOKIT_LOCK_TIMEOUT_MS = '50';
+
+    try {
+      await writeFile(`${todoFile}.lock`, 'locked', { encoding: 'utf8' });
+
+      await assert.rejects(
+        () => addTodos([{ description: 'Lock contention' }]),
+        (error: unknown) =>
+          error instanceof Error &&
+          (error as unknown as { code?: unknown }).code ===
+            'E_STORAGE_LOCK_TIMEOUT'
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TODOKIT_LOCK_TIMEOUT_MS;
+      } else {
+        process.env.TODOKIT_LOCK_TIMEOUT_MS = previous;
+      }
+    }
+  });
 });

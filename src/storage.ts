@@ -75,6 +75,23 @@ export async function getFileMtime(
   }
 }
 
+async function getFileSize(
+  path: string,
+  timeoutMs: number
+): Promise<number | null> {
+  try {
+    const stats = await withTimeout(
+      stat(path),
+      timeoutMs,
+      'File stat timed out'
+    );
+    return stats.size;
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
 export async function readFileIfExists(
   path: string,
   timeoutMs: number,
@@ -148,7 +165,50 @@ const DEFAULT_TODO_FILE = resolve(process.cwd(), 'todos.json');
 
 const IO_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 30_000;
+const LOCK_TIMEOUT_MS = 5_000;
+const DEFAULT_MAX_TODO_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_CONFLICT_RETRIES = 3;
+
+interface CodedError extends Error {
+  code: string;
+}
+
+function createCodedError(code: string, message: string): CodedError {
+  const error = new Error(message) as CodedError;
+  error.code = code;
+  return error;
+}
+
+function isCodedError(error: unknown): error is CodedError {
+  return (
+    error instanceof Error &&
+    typeof (error as unknown as { code?: unknown }).code === 'string'
+  );
+}
+
+export function getCodedErrorCode(error: unknown): string | undefined {
+  return isCodedError(error) ? error.code : undefined;
+}
+
+function getEnvInt(name: string): number | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    return null;
+  }
+  return value;
+}
+
+function getLockTimeoutMs(): number {
+  return getEnvInt('TODOKIT_LOCK_TIMEOUT_MS') ?? LOCK_TIMEOUT_MS;
+}
+
+function getMaxTodoFileBytes(): number {
+  return (
+    getEnvInt('TODOKIT_MAX_TODO_FILE_BYTES') ?? DEFAULT_MAX_TODO_FILE_BYTES
+  );
+}
 
 function getJsonIndentation(): number {
   const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
@@ -182,7 +242,56 @@ function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+async function acquireWriteLock(
+  todoPath: string,
+  timeoutMs: number
+): Promise<() => Promise<void>> {
+  const lockPath = `${todoPath}.lock`;
+  const started = nowMs();
+
+  await mkdir(dirname(todoPath), { recursive: true });
+
+  for (;;) {
+    try {
+      await writeFile(
+        lockPath,
+        `${String(process.pid)} ${new Date().toISOString()}\n`,
+        { encoding: 'utf8', flag: 'wx' }
+      );
+
+      return async () => {
+        await rm(lockPath, { force: true }).catch(() => undefined);
+      };
+    } catch (error: unknown) {
+      const code = getErrorCode(error);
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+
+      const elapsedMs = Math.max(0, nowMs() - started);
+      if (elapsedMs >= timeoutMs) {
+        throw createCodedError(
+          'E_STORAGE_LOCK_TIMEOUT',
+          'Todo storage is busy; please retry.'
+        );
+      }
+      await delay(25);
+    }
+  }
+}
+
 async function loadTodos(path: string): Promise<Todo[]> {
+  const size = await getFileSize(path, IO_TIMEOUT_MS);
+  if (size !== null) {
+    const maxBytes = getMaxTodoFileBytes();
+    if (size > maxBytes) {
+      throw createCodedError(
+        'E_STORAGE_TOO_LARGE',
+        `Todo storage file is too large (${String(size)} bytes; max ${String(maxBytes)}).`
+      );
+    }
+  }
+
   const raw = await readFileIfExists(path, IO_TIMEOUT_MS);
   if (!raw) return [];
   const parsed: unknown = JSON.parse(raw);
@@ -260,22 +369,32 @@ export async function withTodos<T>(
       cache = { todos: current, mtimeMs };
 
       const { todos, result } = mutate(current);
-      const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
-      if (latestMtime !== mtimeMs) {
-        if (attempt >= MAX_CONFLICT_RETRIES) {
-          throw new Error('Todo storage changed during update; please retry.');
-        }
-        await delay(25 * (attempt + 1));
-        continue;
-      }
 
       if (todos !== current) {
-        await saveTodos(path, todos);
+        const release = await acquireWriteLock(path, getLockTimeoutMs());
+        try {
+          const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
+          if (latestMtime !== mtimeMs) {
+            if (attempt >= MAX_CONFLICT_RETRIES) {
+              throw createCodedError(
+                'E_STORAGE_CONFLICT',
+                'Todo storage changed during update; please retry.'
+              );
+            }
+            await delay(25 * (attempt + 1));
+            continue;
+          }
+
+          await saveTodos(path, todos);
+        } finally {
+          await release();
+        }
       }
       return result;
     }
 
-    throw new Error(
+    throw createCodedError(
+      'E_STORAGE_CONFLICT',
       'Todo storage update failed due to concurrent modifications'
     );
   });

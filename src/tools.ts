@@ -44,11 +44,23 @@ import {
   type CompleteTodoOutcome,
   deleteAllTodos,
   deleteTodoBySelector,
+  getCodedErrorCode,
   getTodos,
   type TodoUpdate,
   toResolveInput,
   updateTodoBySelector,
 } from './storage.js';
+
+function mapExecutionError(
+  error: unknown,
+  fallbackCode: string
+): { code: string; message: string } {
+  const coded = getCodedErrorCode(error);
+  if (coded) {
+    return { code: coded, message: getErrorMessage(error) };
+  }
+  return { code: fallbackCode, message: getErrorMessage(error) };
+}
 
 interface ToolConfig<
   InputArgs extends AnySchema,
@@ -218,7 +230,8 @@ async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
     const todos = await addTodos([{ description }]);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
-    return createErrorResponse('E_ADD_TODO', getErrorMessage(err));
+    const mapped = mapExecutionError(err, 'E_ADD_TODO');
+    return createErrorResponse(mapped.code, mapped.message);
   }
 }
 
@@ -249,7 +262,8 @@ async function handleAddTodos(input: AddTodosInput): Promise<CallToolResult> {
     const todos = await addTodos(input.items);
     return buildAddTodosResponse(todos);
   } catch (err) {
-    return createErrorResponse('E_ADD_TODOS', getErrorMessage(err));
+    const mapped = mapExecutionError(err, 'E_ADD_TODOS');
+    return createErrorResponse(mapped.code, mapped.message);
   }
 }
 
@@ -339,7 +353,8 @@ export function registerListTodos(server: McpServer): void {
       try {
         return await handleListTodos(filters);
       } catch (err) {
-        return createErrorResponse('E_LIST_TODOS', getErrorMessage(err));
+        const mapped = mapExecutionError(err, 'E_LIST_TODOS');
+        return createErrorResponse(mapped.code, mapped.message);
       }
     }
   );
@@ -396,7 +411,8 @@ export function registerUpdateTodo(server: McpServer): void {
       try {
         return await handleUpdateTodo(input);
       } catch (err) {
-        return createErrorResponse('E_UPDATE_TODO', getErrorMessage(err));
+        const mapped = mapExecutionError(err, 'E_UPDATE_TODO');
+        return createErrorResponse(mapped.code, mapped.message);
       }
     }
   );
@@ -459,7 +475,8 @@ export function registerCompleteTodo(server: McpServer): void {
       try {
         return await handleCompleteTodo(input);
       } catch (err) {
-        return createErrorResponse('E_COMPLETE_TODO', getErrorMessage(err));
+        const mapped = mapExecutionError(err, 'E_COMPLETE_TODO');
+        return createErrorResponse(mapped.code, mapped.message);
       }
     }
   );
@@ -507,7 +524,8 @@ export function registerDeleteTodo(server: McpServer): void {
       try {
         return await handleDeleteTodo(input);
       } catch (err) {
-        return createErrorResponse('E_DELETE_TODO', getErrorMessage(err));
+        const mapped = mapExecutionError(err, 'E_DELETE_TODO');
+        return createErrorResponse(mapped.code, mapped.message);
       }
     }
   );
@@ -547,7 +565,8 @@ export function registerClearTodos(server: McpServer): void {
       try {
         return await handleDeleteTodos();
       } catch (err) {
-        return createErrorResponse('E_CLEAR_TODOS', getErrorMessage(err));
+        const mapped = mapExecutionError(err, 'E_CLEAR_TODOS');
+        return createErrorResponse(mapped.code, mapped.message);
       }
     }
   );
