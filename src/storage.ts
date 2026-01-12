@@ -169,25 +169,22 @@ const LOCK_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_TODO_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_CONFLICT_RETRIES = 3;
 
-interface CodedError extends Error {
-  code: string;
+class StorageError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'StorageError';
+    this.code = code;
+  }
 }
 
-function createCodedError(code: string, message: string): CodedError {
-  const error = new Error(message) as CodedError;
-  error.code = code;
-  return error;
-}
-
-function isCodedError(error: unknown): error is CodedError {
-  return (
-    error instanceof Error &&
-    typeof (error as unknown as { code?: unknown }).code === 'string'
-  );
+function createCodedError(code: string, message: string): StorageError {
+  return new StorageError(code, message);
 }
 
 export function getCodedErrorCode(error: unknown): string | undefined {
-  return isCodedError(error) ? error.code : undefined;
+  return error instanceof StorageError ? error.code : undefined;
 }
 
 function getEnvInt(name: string): number | null {
@@ -420,25 +417,26 @@ export interface TodoFilters {
   query?: string | undefined;
 }
 
-function matchesCompleted(todo: Todo, completed?: boolean): boolean {
-  return completed === undefined || todo.completed === completed;
-}
-
-function matchesQuery(todo: Todo, query?: string): boolean {
-  if (!query) return true;
-  return todo.description.toLowerCase().includes(query);
-}
-
 export function filterTodos(
   todos: readonly Todo[],
   filters: TodoFilters
 ): readonly Todo[] {
-  const query = filters.query?.trim().toLowerCase();
+  const { completed, query: rawQuery } = filters;
+  const hasCompletedFilter = completed !== undefined;
+  const trimmedQuery = rawQuery?.trim();
+  const query = trimmedQuery?.toLowerCase();
 
-  return todos.filter(
-    (todo) =>
-      matchesCompleted(todo, filters.completed) && matchesQuery(todo, query)
-  );
+  if (!hasCompletedFilter && !query) {
+    return todos;
+  }
+
+  const matches: Todo[] = [];
+  for (const todo of todos) {
+    if (hasCompletedFilter && todo.completed !== completed) continue;
+    if (query && !todo.description.toLowerCase().includes(query)) continue;
+    matches.push(todo);
+  }
+  return matches;
 }
 
 export interface TodoMatchPreview {

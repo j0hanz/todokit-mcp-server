@@ -156,6 +156,17 @@ function patchToolErrorResponses(server: McpServer): void {
     return;
   }
 
+  const descriptor = Object.getOwnPropertyDescriptor(target, 'createToolError');
+  if (descriptor) {
+    if (descriptor.writable === false && descriptor.set === undefined) {
+      return;
+    }
+  }
+
+  if (!Object.isExtensible(target)) {
+    return;
+  }
+
   try {
     target.createToolError = (message: string): CallToolResult => {
       const structured = {
