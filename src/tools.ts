@@ -227,9 +227,9 @@ const addTodoToolConfig = {
 };
 
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
-  const { description, priority, tags, dueAt } = input;
+  const { description, priority, category, dueAt } = input;
   try {
-    const todos = await addTodos([{ description, priority, tags, dueAt }]);
+    const todos = await addTodos([{ description, priority, category, dueAt }]);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     const mapped = mapExecutionError(err, 'E_ADD_TODO');
@@ -432,10 +432,18 @@ type UpdateFields = TodoUpdate;
 
 function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
   const updates: UpdateFields = {};
-  if (input.description !== undefined) updates.description = input.description;
-  if (input.priority !== undefined) updates.priority = input.priority;
-  if (input.tags !== undefined) updates.tags = input.tags;
-  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
+  if (input.description !== undefined) {
+    updates.description = input.description;
+  }
+  if (input.priority !== undefined) {
+    updates.priority = input.priority;
+  }
+  if (input.category !== undefined) {
+    updates.category = input.category;
+  }
+  if (input.dueAt !== undefined) {
+    updates.dueAt = input.dueAt;
+  }
   return Object.keys(updates).length > 0 ? updates : null;
 }
 

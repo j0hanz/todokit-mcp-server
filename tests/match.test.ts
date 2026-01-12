@@ -6,6 +6,9 @@ import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
 
+const DEFAULT_PRIORITY = 'medium' as const;
+const DEFAULT_CATEGORY = 'work' as const;
+
 describe('id-based matching', { timeout: TEST_TIMEOUT_MS }, () => {
   it('returns not_found when updating a missing id', async () => {
     const outcome = await updateTodoById('missing-id', () => ({
@@ -33,8 +36,16 @@ describe('id-based matching', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('updates and deletes an existing id', async () => {
     const [todo, extra] = await addTodos([
-      { description: 'Match test todo' },
-      { description: 'Keep pending to avoid auto-delete' },
+      {
+        description: 'Match test todo',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Keep pending to avoid auto-delete',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(todo);
     assert.ok(extra);

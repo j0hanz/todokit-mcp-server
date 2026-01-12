@@ -144,12 +144,12 @@ The `result` shape is tool-specific.
 
 Create a new todo item.
 
-| Parameter   | Type     | Required | Description                                                           |
-| :---------- | :------- | :------- | :-------------------------------------------------------------------- |
-| description | string   | Yes      | Description of the todo (1-2000 chars)                                |
-| priority    | string   | No       | Priority: `low`, `medium`, `high`                                     |
-| tags        | string[] | No       | Optional tags (e.g., `["work", "bug"]`)                               |
-| dueAt       | string   | No       | Optional due date/time as an ISO 8601 timestamp with offset (RFC3339) |
+| Parameter   | Type   | Required | Description                                                           |
+| :---------- | :----- | :------- | :-------------------------------------------------------------------- |
+| description | string | Yes      | Description of the todo (1-2000 chars)                                |
+| priority    | string | Yes      | Priority: `low`, `medium`, `high`                                     |
+| category    | string | Yes      | Category: `work`, `bug`, `testing`, `docs`                            |
+| dueAt       | string | No       | Optional due date/time as an ISO 8601 timestamp with offset (RFC3339) |
 
 Result fields:
 
@@ -163,7 +163,7 @@ Add multiple todo items in one call.
 
 Parameters:
 
-- `items` (array, required): Array of todo objects (1-50 items). Each item supports `description`, `priority`, `tags`, `dueAt`.
+- `items` (array, required): Array of todo objects (1-50 items). Each item supports `description`, `priority`, `category`, `dueAt`.
 
 Result fields:
 
@@ -196,13 +196,13 @@ Result fields:
 
 Update fields on a todo item.
 
-| Parameter   | Type     | Required | Description                                  |
-| :---------- | :------- | :------- | :------------------------------------------- |
-| id          | string   | Yes      | The ID of the todo to update                 |
-| description | string   | No       | New description (1-2000 chars)               |
-| priority    | string   | No       | New priority: `low`, `medium`, `high`        |
-| tags        | string[] | No       | Replace tags for this todo                   |
-| dueAt       | string   | No       | Replace due date/time (ISO 8601 with offset) |
+| Parameter   | Type   | Required | Description                                    |
+| :---------- | :----- | :------- | :--------------------------------------------- |
+| id          | string | Yes      | The ID of the todo to update                   |
+| description | string | No       | New description (1-2000 chars)                 |
+| priority    | string | No       | New priority: `low`, `medium`, `high`          |
+| category    | string | No       | New category: `work`, `bug`, `testing`, `docs` |
+| dueAt       | string | No       | Replace due date/time (ISO 8601 with offset)   |
 
 Notes:
 
@@ -251,8 +251,8 @@ A todo item has the following shape:
   "id": "string",
   "description": "string",
   "completed": false,
-  "priority": "low|medium|high?",
-  "tags": ["string"],
+  "priority": "low|medium|high",
+  "category": "work|bug|testing|docs",
   "dueAt": "ISO timestamp with offset?",
   "createdAt": "ISO timestamp with offset",
   "updatedAt": "ISO timestamp with offset?",

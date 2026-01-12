@@ -548,7 +548,7 @@ export interface TodoUpdate {
   description?: string;
   completed?: boolean;
   priority?: Todo['priority'];
-  tags?: Todo['tags'];
+  category?: Todo['category'];
   dueAt?: Todo['dueAt'];
 }
 
@@ -568,32 +568,9 @@ export type CompleteTodoOutcome =
 
 interface NewTodoInput {
   description: string;
-  priority?: Todo['priority'] | undefined;
-  tags?: Todo['tags'] | undefined;
+  priority: Todo['priority'];
+  category: Todo['category'];
   dueAt?: Todo['dueAt'] | undefined;
-}
-
-function normalizeTags(
-  tags: Todo['tags'] | undefined
-): Todo['tags'] | undefined {
-  if (!tags) return undefined;
-  const normalized = tags
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-  return normalized;
-}
-
-function areStringArraysEqual(left: string[], right: string[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === 'string')
-  );
 }
 
 function hasOwnKey<T extends object>(obj: T, key: PropertyKey): key is keyof T {
@@ -601,9 +578,6 @@ function hasOwnKey<T extends object>(obj: T, key: PropertyKey): key is keyof T {
 }
 
 function valuesEqual(current: unknown, update: unknown): boolean {
-  if (isStringArray(update) && isStringArray(current)) {
-    return areStringArraysEqual(update, current);
-  }
   return Object.is(current, update);
 }
 
@@ -624,7 +598,7 @@ function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
     description: item.description,
     completed: false,
     priority: item.priority,
-    tags: normalizeTags(item.tags),
+    category: item.category,
     dueAt: item.dueAt,
     createdAt: timestamp,
     updatedAt: timestamp,

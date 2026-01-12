@@ -10,6 +10,9 @@ import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
 
+const DEFAULT_PRIORITY = 'medium' as const;
+const DEFAULT_CATEGORY = 'work' as const;
+
 type ToolHandler<T> = (input: T) => Promise<CallToolResult>;
 
 type StructuredResult = {
@@ -112,16 +115,39 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerAllTools(server);
 
-    const addHandler = getHandler<{ description: string }>('add_todo');
-    const batchHandler = getHandler<{ items: { description: string }[] }>(
-      'add_todos'
-    );
+    const addHandler = getHandler<{
+      description: string;
+      priority: typeof DEFAULT_PRIORITY;
+      category: typeof DEFAULT_CATEGORY;
+    }>('add_todo');
+    const batchHandler = getHandler<{
+      items: {
+        description: string;
+        priority: typeof DEFAULT_PRIORITY;
+        category: typeof DEFAULT_CATEGORY;
+      }[];
+    }>('add_todos');
 
-    const addResult = await addHandler({ description: 'Task A' });
+    const addResult = await addHandler({
+      description: 'Task A',
+      priority: DEFAULT_PRIORITY,
+      category: DEFAULT_CATEGORY,
+    });
     assert.equal(getStructured(addResult)?.ok, true);
 
     const batchResult = await batchHandler({
-      items: [{ description: 'Task B' }, { description: 'Task C' }],
+      items: [
+        {
+          description: 'Task B',
+          priority: DEFAULT_PRIORITY,
+          category: DEFAULT_CATEGORY,
+        },
+        {
+          description: 'Task C',
+          priority: DEFAULT_PRIORITY,
+          category: DEFAULT_CATEGORY,
+        },
+      ],
     });
     assert.equal(getStructured(batchResult)?.ok, true);
 
@@ -134,8 +160,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [alpha, beta] = await addTodos([
-      { description: 'Alpha task' },
-      { description: 'Beta task' },
+      {
+        description: 'Alpha task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Beta task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(alpha);
     assert.ok(beta);
@@ -160,9 +194,21 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [first, second, third] = await addTodos([
-      { description: 'First task' },
-      { description: 'Second task' },
-      { description: 'Third task' },
+      {
+        description: 'First task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Second task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Third task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(first);
     assert.ok(second);
@@ -203,8 +249,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [pending, completed] = await addTodos([
-      { description: 'Pending task' },
-      { description: 'Completed task' },
+      {
+        description: 'Pending task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Completed task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(pending);
     assert.ok(completed);
@@ -240,8 +294,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [todo, extra] = await addTodos([
-      { description: 'Manage this task' },
-      { description: 'Keep pending to avoid auto-delete' },
+      {
+        description: 'Manage this task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Keep pending to avoid auto-delete',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(todo);
     assert.ok(extra);
@@ -269,7 +331,13 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerAllTools(server);
 
-    const [todo] = await addTodos([{ description: 'Has description' }]);
+    const [todo] = await addTodos([
+      {
+        description: 'Has description',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+    ]);
     assert.ok(todo);
 
     const updateHandler = getHandler<{
@@ -287,8 +355,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [todo, extra] = await addTodos([
-      { description: 'Finish this task' },
-      { description: 'Keep pending to avoid auto-delete' },
+      {
+        description: 'Finish this task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Keep pending to avoid auto-delete',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(todo);
     assert.ok(extra);
@@ -322,8 +398,16 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerAllTools(server);
 
     const [todo1, todo2] = await addTodos([
-      { description: 'Item one' },
-      { description: 'Item two' },
+      {
+        description: 'Item one',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Item two',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(todo1);
     assert.ok(todo2);
@@ -345,7 +429,13 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerAllTools(server);
 
-    await addTodos([{ description: 'Some item' }]);
+    await addTodos([
+      {
+        description: 'Some item',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+    ]);
 
     const deleteHandler = getHandler<{ id: string }>('delete_todo');
     const result = await deleteHandler({ id: 'non-existent-id' });

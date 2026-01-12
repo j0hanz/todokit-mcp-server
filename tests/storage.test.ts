@@ -13,6 +13,9 @@ import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
 
+const DEFAULT_PRIORITY = 'medium' as const;
+const DEFAULT_CATEGORY = 'work' as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -28,15 +31,29 @@ async function readTextIfExists(path: string): Promise<string | null> {
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('generates uuid-like ids', async () => {
-    const [todo] = await addTodos([{ description: 'ID Check test' }]);
+    const [todo] = await addTodos([
+      {
+        description: 'ID Check test',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+    ]);
     assert.ok(todo);
     assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
 
   it('updates todo completion', async () => {
     const [todo, extra] = await addTodos([
-      { description: 'Delta completion test' },
-      { description: 'Keep pending to avoid auto-delete' },
+      {
+        description: 'Delta completion test',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Keep pending to avoid auto-delete',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(todo);
     assert.ok(extra);
@@ -63,7 +80,13 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('deletes todos', async () => {
-    const [todo] = await addTodos([{ description: 'Epsilon delete test' }]);
+    const [todo] = await addTodos([
+      {
+        description: 'Epsilon delete test',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+    ]);
     assert.ok(todo);
     const deleted = await deleteTodoById(todo.id);
     assert.equal(deleted.kind, 'match');
@@ -79,6 +102,8 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     const count = 25;
     const items = Array.from({ length: count }, (_, index) => ({
       description: `Concurrent test item ${index}`,
+      priority: DEFAULT_PRIORITY,
+      category: DEFAULT_CATEGORY,
     }));
     await Promise.all(items.map((item) => addTodos([item])));
     const todos = await getTodos();
@@ -128,7 +153,14 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
       await writeFile(`${todoFile}.lock`, 'locked', { encoding: 'utf8' });
 
       await assert.rejects(
-        () => addTodos([{ description: 'Lock contention' }]),
+        () =>
+          addTodos([
+            {
+              description: 'Lock contention',
+              priority: DEFAULT_PRIORITY,
+              category: DEFAULT_CATEGORY,
+            },
+          ]),
         (error: unknown) =>
           error instanceof Error &&
           (error as unknown as { code?: unknown }).code ===
@@ -148,8 +180,16 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.ok(todoFile);
 
     const [first, second] = await addTodos([
-      { description: 'Finish one' },
-      { description: 'Finish two' },
+      {
+        description: 'Finish one',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Finish two',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
     ]);
     assert.ok(first);
     assert.ok(second);
@@ -176,6 +216,8 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
         id: 'completed-1',
         description: 'Already completed',
         completed: true,
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
         createdAt: now,
         updatedAt: now,
         completedAt: now,

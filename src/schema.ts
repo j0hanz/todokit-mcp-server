@@ -8,12 +8,21 @@ type Priority = 'low' | 'medium' | 'high';
 
 const PrioritySchema: ZodType<Priority> = z.enum(['low', 'medium', 'high']);
 
+type Category = 'work' | 'bug' | 'testing' | 'docs';
+
+const CategorySchema: ZodType<Category> = z.enum([
+  'work',
+  'bug',
+  'testing',
+  'docs',
+]);
+
 export interface Todo {
   id: string;
   description: string;
   completed: boolean;
-  priority?: Priority | undefined;
-  tags?: string[] | undefined;
+  priority: Priority;
+  category: Category;
   dueAt?: string | undefined;
   createdAt: string;
   updatedAt?: string | undefined;
@@ -24,8 +33,8 @@ const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   description: z.string(),
   completed: z.boolean(),
-  priority: PrioritySchema.optional(),
-  tags: z.array(z.string().min(1).max(50)).max(50).optional(),
+  priority: PrioritySchema,
+  category: CategorySchema,
   dueAt: IsoDateTimeSchema.optional(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema.optional(),
@@ -38,8 +47,8 @@ type Status = 'pending' | 'completed' | 'all';
 
 interface TodoInput {
   description: string;
-  priority?: Priority | undefined;
-  tags?: string[] | undefined;
+  priority: Priority;
+  category: Category;
   dueAt?: string | undefined;
 }
 
@@ -59,7 +68,7 @@ interface UpdateTodoInput {
   id: string;
   description?: string | undefined;
   priority?: Priority | undefined;
-  tags?: string[] | undefined;
+  category?: Category | undefined;
   dueAt?: string | undefined;
 }
 
@@ -71,14 +80,10 @@ const StatusSchema: ZodType<Status> = z.enum(['pending', 'completed', 'all']);
 
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   description: z.string().min(1).max(2000).describe('Description of the todo'),
-  priority: PrioritySchema.optional().describe(
-    'Task priority: low, medium, or high'
+  priority: PrioritySchema.describe('Task priority: low, medium, or high'),
+  category: CategorySchema.describe(
+    'Task category: work, bug, testing, or docs'
   ),
-  tags: z
-    .array(z.string().min(1).max(50))
-    .max(50)
-    .optional()
-    .describe('Optional tags for grouping (e.g., ["work", "bug"])'),
   dueAt: IsoDateTimeSchema.optional().describe(
     'Optional due date/time as an ISO 8601 timestamp with offset'
   ),
@@ -113,11 +118,9 @@ export const UpdateTodoSchema: ZodType<UpdateTodoInput> = z.strictObject({
   priority: PrioritySchema.optional().describe(
     'New priority: low, medium, or high'
   ),
-  tags: z
-    .array(z.string().min(1).max(50))
-    .max(50)
-    .optional()
-    .describe('Replace tags for this todo'),
+  category: CategorySchema.optional().describe(
+    'New category: work, bug, testing, or docs'
+  ),
   dueAt: IsoDateTimeSchema.optional().describe(
     'Replace due date/time as an ISO 8601 timestamp with offset'
   ),

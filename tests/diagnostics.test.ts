@@ -10,6 +10,9 @@ import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
 
+const DEFAULT_PRIORITY = 'medium' as const;
+const DEFAULT_CATEGORY = 'work' as const;
+
 type ToolHandler<T> = (input: T) => Promise<CallToolResult>;
 
 type StructuredResult = {
@@ -62,8 +65,16 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
       const { server, getHandler } = createToolHarness();
       registerAllTools(server);
 
-      const addHandler = getHandler<{ description: string }>('add_todo');
-      const addResult = await addHandler({ description: 'Diag Task' });
+      const addHandler = getHandler<{
+        description: string;
+        priority: typeof DEFAULT_PRIORITY;
+        category: typeof DEFAULT_CATEGORY;
+      }>('add_todo');
+      const addResult = await addHandler({
+        description: 'Diag Task',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      });
       assert.equal((addResult as StructuredResult).structuredContent?.ok, true);
 
       const callEvent = toolEvents.find((event) => {

@@ -16,9 +16,28 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
   it('rejects unknown fields on add', () => {
     const result = AddTodoSchema.safeParse({
       description: 'Test desc',
+      priority: 'medium',
+      category: 'work',
       extra: 'nope',
     });
     assert.equal(result.success, false);
+  });
+
+  it('rejects missing required fields on add', () => {
+    assert.equal(
+      AddTodoSchema.safeParse({
+        description: 'Missing priority',
+        category: 'work',
+      }).success,
+      false
+    );
+    assert.equal(
+      AddTodoSchema.safeParse({
+        description: 'Missing category',
+        priority: 'medium',
+      }).success,
+      false
+    );
   });
 
   it('rejects unknown fields on update', () => {
@@ -40,6 +59,8 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
         id: '1',
         description: 'Bad timestamp',
         completed: false,
+        priority: 'medium',
+        category: 'work',
         createdAt: 'not-iso',
       },
     ]);
@@ -52,6 +73,8 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
         id: '1',
         description: 'Extra field',
         completed: false,
+        priority: 'medium',
+        category: 'work',
         createdAt: '2025-02-28T10:30:00Z',
         extra: 'nope',
       },
@@ -71,6 +94,8 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(
       AddTodoSchema.safeParse({
         description: 'Has due date',
+        priority: 'medium',
+        category: 'work',
         dueAt: '2025-02-28T10:30:00Z',
       }).success,
       true
@@ -78,6 +103,8 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(
       AddTodoSchema.safeParse({
         description: 'Bad due date',
+        priority: 'medium',
+        category: 'work',
         dueAt: '2025-02-28 10:30:00Z',
       }).success,
       false
