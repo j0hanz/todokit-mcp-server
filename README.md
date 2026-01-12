@@ -66,6 +66,8 @@ npm start
 
 By default, todos are stored in `todos.json` in the current working directory. To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path ending with `.json`. Relative paths resolve from the current working directory. The directory is created as needed; if the file does not exist, the server starts with an empty list.
 
+When all todos are completed, the server removes the storage file so it does not linger on disk.
+
 Examples:
 
 ```bash

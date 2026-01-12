@@ -261,8 +261,12 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     registerCompleteTodo(server);
     registerDeleteTodo(server);
 
-    const [todo] = await addTodos([{ description: 'Manage this task' }]);
+    const [todo, extra] = await addTodos([
+      { description: 'Manage this task' },
+      { description: 'Keep pending to avoid auto-delete' },
+    ]);
     assert.ok(todo);
+    assert.ok(extra);
 
     const updateHandler = getHandler<{
       id: string;
@@ -304,8 +308,12 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     const { server, getHandler } = createToolHarness();
     registerCompleteTodo(server);
 
-    const [todo] = await addTodos([{ description: 'Finish this task' }]);
+    const [todo, extra] = await addTodos([
+      { description: 'Finish this task' },
+      { description: 'Keep pending to avoid auto-delete' },
+    ]);
     assert.ok(todo);
+    assert.ok(extra);
     const completeHandler = getHandler<{ id: string }>('complete_todo');
 
     const completeResult = await completeHandler({ id: todo.id });

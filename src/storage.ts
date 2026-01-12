@@ -362,14 +362,54 @@ export async function withTodos<T>(
     if (nextTodos === todos) {
       return { kind: 'no_change', result };
     }
+    if (areAllTodosCompleted(nextTodos)) {
+      return { kind: 'delete_file', result };
+    }
     return { kind: 'save', todos: nextTodos, result };
   });
+}
+
+function areAllTodosCompleted(todos: readonly Todo[]): boolean {
+  return todos.length > 0 && todos.every((todo) => todo.completed);
 }
 
 type TodoFileUpdate<T> =
   | { kind: 'no_change'; result: T }
   | { kind: 'save'; todos: Todo[]; result: T }
   | { kind: 'delete_file'; result: T };
+
+type NormalizedTodoFileUpdate<T> = Exclude<
+  TodoFileUpdate<T>,
+  { kind: 'no_change' }
+>;
+
+function normalizeTodoFileUpdate<T>(
+  outcome: TodoFileUpdate<T>,
+  current: Todo[],
+  hasPersistedFile: boolean
+):
+  | { kind: 'return'; result: T }
+  | { kind: 'proceed'; outcome: NormalizedTodoFileUpdate<T> } {
+  if (outcome.kind === 'save' && areAllTodosCompleted(outcome.todos)) {
+    return {
+      kind: 'proceed',
+      outcome: { kind: 'delete_file', result: outcome.result },
+    };
+  }
+
+  if (outcome.kind !== 'no_change') {
+    return { kind: 'proceed', outcome };
+  }
+
+  if (hasPersistedFile && areAllTodosCompleted(current)) {
+    return {
+      kind: 'proceed',
+      outcome: { kind: 'delete_file', result: outcome.result },
+    };
+  }
+
+  return { kind: 'return', result: outcome.result };
+}
 
 async function deleteTodoFile(path: string): Promise<void> {
   const start = nowMs();
@@ -408,10 +448,15 @@ async function withTodoFileUpdate<T>(
         cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
       cache = { todos: current, mtimeMs };
 
-      const outcome = work(current);
-      if (outcome.kind === 'no_change') {
-        return outcome.result;
+      const normalized = normalizeTodoFileUpdate(
+        work(current),
+        current,
+        mtimeMs !== null
+      );
+      if (normalized.kind === 'return') {
+        return normalized.result;
       }
+      const { outcome } = normalized;
 
       const release = await acquireWriteLock(path, getLockTimeoutMs());
       try {

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import {
   addTodos,
+  completeTodoBySelector,
   deleteTodoBySelector,
   getTodos,
   readFileIfExists,
@@ -44,8 +45,12 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('updates todo completion', async () => {
-    const [todo] = await addTodos([{ description: 'Delta completion test' }]);
+    const [todo, extra] = await addTodos([
+      { description: 'Delta completion test' },
+      { description: 'Keep pending to avoid auto-delete' },
+    ]);
     assert.ok(todo);
+    assert.ok(extra);
 
     const completed = await updateTodoBySelector({ id: todo.id }, () => ({
       completed: true,
@@ -180,5 +185,54 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
         process.env.TODOKIT_LOCK_TIMEOUT_MS = previous;
       }
     }
+  });
+
+  it('deletes the storage file when all todos are completed', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const [first, second] = await addTodos([
+      { description: 'Finish one' },
+      { description: 'Finish two' },
+    ]);
+    assert.ok(first);
+    assert.ok(second);
+
+    await completeTodoBySelector({ id: first.id }, true);
+    const stillThere = await readFileIfExists(todoFile, 2_000);
+    assert.ok(stillThere);
+
+    await completeTodoBySelector({ id: second.id }, true);
+    const deleted = await readFileIfExists(todoFile, 2_000);
+    assert.equal(deleted, null);
+
+    const remaining = await getTodos();
+    assert.equal(remaining.length, 0);
+  });
+
+  it('deletes the storage file on no-op completion when all todos are already completed', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const now = new Date().toISOString();
+    const persisted = [
+      {
+        id: 'completed-1',
+        description: 'Already completed',
+        completed: true,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now,
+      },
+    ];
+    await writeFile(todoFile, JSON.stringify(persisted, null, 2) + '\n', {
+      encoding: 'utf8',
+    });
+
+    const outcome = await completeTodoBySelector({ id: 'completed-1' }, true);
+    assert.equal(outcome.kind, 'already');
+
+    const deleted = await readFileIfExists(todoFile, 2_000);
+    assert.equal(deleted, null);
   });
 });
