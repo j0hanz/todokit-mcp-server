@@ -23,7 +23,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('adds todos and filters by query', async () => {
     const [todoA, todoB, todoC] = await addTodos([
-      { description: 'Alpha description here' },
+      { description: 'Alpha description here', tags: ['WORK'] },
       { description: 'Beta description here' },
       { description: 'Gamma description here' },
     ]);
@@ -41,6 +41,18 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.deepEqual(
       byBeta.map((todo) => todo.id),
       [todoB.id]
+    );
+
+    const byTag = await getTodos({ query: 'work' });
+    assert.deepEqual(
+      byTag.map((todo) => todo.id),
+      [todoA.id]
+    );
+
+    const byMultiToken = await getTodos({ query: 'alpha work' });
+    assert.deepEqual(
+      byMultiToken.map((todo) => todo.id),
+      [todoA.id]
     );
   });
 

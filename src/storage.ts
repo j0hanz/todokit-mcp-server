@@ -75,6 +75,29 @@ export async function getFileMtime(
   }
 }
 
+interface FileMetadata {
+  mtimeMs: number;
+  size: number;
+}
+
+async function getFileMetadataIfExists(
+  path: string,
+  timeoutMs: number
+): Promise<FileMetadata | null> {
+  try {
+    const stats = await withTimeout(
+      stat(path),
+      timeoutMs,
+      'File stat timed out'
+    );
+    return { mtimeMs: stats.mtimeMs, size: stats.size };
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    if (isAbortError(error)) throw error;
+    throw error;
+  }
+}
+
 async function getFileSize(
   path: string,
   timeoutMs: number
@@ -277,8 +300,8 @@ async function acquireWriteLock(
   }
 }
 
-async function loadTodos(path: string): Promise<Todo[]> {
-  const size = await getFileSize(path, IO_TIMEOUT_MS);
+async function loadTodos(path: string, sizeHint?: number): Promise<Todo[]> {
+  const size = sizeHint ?? (await getFileSize(path, IO_TIMEOUT_MS));
   if (size !== null) {
     const maxBytes = getMaxTodoFileBytes();
     if (size > maxBytes) {
@@ -341,14 +364,18 @@ export async function readTodos(): Promise<readonly Todo[]> {
   const start = nowMs();
   await writeQueue;
   const path = getTodoFilePath();
-  const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
+  const metadata = await getFileMetadataIfExists(path, IO_TIMEOUT_MS);
+  const mtimeMs = metadata?.mtimeMs ?? null;
   const cached = getCachedTodos(mtimeMs);
   if (cached) {
     publishReadEvent(start, true, cached.length);
     return cached;
   }
-  const todos = await loadTodos(path);
-  cache = { todos, mtimeMs };
+  const todos = await loadTodos(path, metadata?.size);
+  const finalMtimeMs = metadata
+    ? mtimeMs
+    : await getFileMtime(path, IO_TIMEOUT_MS);
+  cache = { todos, mtimeMs: finalMtimeMs };
 
   publishReadEvent(start, false, todos.length);
   return todos;
@@ -443,9 +470,16 @@ async function withTodoFileUpdate<T>(
     const path = getTodoFilePath();
 
     for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
-      const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
+      const metadata = await getFileMetadataIfExists(path, IO_TIMEOUT_MS);
+      const initialMtimeMs = metadata?.mtimeMs ?? null;
       const current =
-        cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
+        cache?.mtimeMs === initialMtimeMs
+          ? cache.todos
+          : await loadTodos(path, metadata?.size);
+
+      const mtimeMs = metadata
+        ? initialMtimeMs
+        : await getFileMtime(path, IO_TIMEOUT_MS);
       cache = { todos: current, mtimeMs };
 
       const normalized = normalizeTodoFileUpdate(
@@ -554,12 +588,17 @@ function matchesQuery(todo: Todo, queryTokens: readonly string[]): boolean {
   if (queryTokens.length === 0) return true;
 
   const description = todo.description.toLowerCase();
-  const tags = (todo.tags ?? []).map((tag) => tag.toLowerCase());
+  const tags = todo.tags ?? [];
 
   const hasToken = (token: string): boolean => {
     if (token.length === 0) return false;
     if (description.includes(token)) return true;
-    return tags.some((tag) => tag.includes(token));
+
+    for (const tag of tags) {
+      if (tag.toLowerCase().includes(token)) return true;
+    }
+
+    return false;
   };
 
   // Preserve the previous behavior for single-token queries.

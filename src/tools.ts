@@ -365,13 +365,13 @@ async function handleListTodos(
   const counts = computeCounts(allTodos);
 
   const status = resolveStatus(filters.status);
-  let filtered: Todo[];
+  let filtered: readonly Todo[];
   if (status === 'pending') {
     filtered = allTodos.filter((todo) => !todo.completed);
   } else if (status === 'completed') {
     filtered = allTodos.filter((todo) => todo.completed);
   } else {
-    filtered = [...allTodos];
+    filtered = allTodos;
   }
   const filteredCounts = computeCounts(filtered);
 
