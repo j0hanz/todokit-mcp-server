@@ -81,17 +81,6 @@ export function nowMs(): number {
   return performance.now();
 }
 
-export function publishToolCall(tool: string, input: unknown): void {
-  const event: ToolCallEvent = {
-    v: 1,
-    kind: 'tool_call',
-    tool,
-    at: new Date().toISOString(),
-    input: summarizeInput(input),
-  };
-  safePublish(toolDiagnosticsChannel, event);
-}
-
 export function publishToolCallWithId(
   tool: string,
   input: unknown,

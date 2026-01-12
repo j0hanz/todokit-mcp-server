@@ -41,14 +41,13 @@ import {
 } from './schema.js';
 import {
   addTodos,
-  completeTodoBySelector,
+  completeTodoById,
   type CompleteTodoOutcome,
-  deleteTodoBySelector,
+  deleteTodoById,
   getCodedErrorCode,
   getTodos,
   type TodoUpdate,
-  toResolveInput,
-  updateTodoBySelector,
+  updateTodoById,
 } from './storage.js';
 
 function mapExecutionError(
@@ -165,7 +164,7 @@ function createWrappedHandler<InputArgs extends AnySchema>(
   return wrapped as ToolCallback<InputArgs>;
 }
 
-export function registerToolWithDiagnostics<
+function registerToolWithDiagnostics<
   OutputArgs extends AnySchema,
   InputArgs extends AnySchema,
 >(
@@ -238,7 +237,7 @@ async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
   }
 }
 
-export function registerAddTodo(server: McpServer): void {
+function registerAddTodo(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'add_todo',
@@ -271,7 +270,7 @@ async function handleAddTodos(input: AddTodosInput): Promise<CallToolResult> {
   }
 }
 
-export function registerAddTodos(server: McpServer): void {
+function registerAddTodos(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'add_todos',
@@ -402,7 +401,7 @@ async function handleListTodos(
   });
 }
 
-export function registerListTodos(server: McpServer): void {
+function registerListTodos(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'list_todos',
@@ -443,11 +442,10 @@ function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
 async function handleUpdateTodo(
   input: UpdateTodoInput
 ): Promise<CallToolResult> {
-  const outcome = await updateTodoBySelector(
-    toResolveInput({ id: input.id }),
-    () => buildUpdatePayload(input)
+  const outcome = await updateTodoById(input.id, () =>
+    buildUpdatePayload(input)
   );
-  if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
+  if (outcome.kind === 'error') {
     return outcome.response;
   }
   if (outcome.kind === 'no_updates') {
@@ -464,7 +462,7 @@ async function handleUpdateTodo(
   });
 }
 
-export function registerUpdateTodo(server: McpServer): void {
+function registerUpdateTodo(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'update_todo',
@@ -510,7 +508,7 @@ function buildCompletionSummary(already: boolean): string {
 }
 
 function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
-  if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
+  if (outcome.kind === 'error') {
     return outcome.response;
   }
   const already = outcome.kind === 'already';
@@ -521,14 +519,11 @@ function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
 async function handleCompleteTodo(
   input: CompleteTodoInput
 ): Promise<CallToolResult> {
-  const outcome = await completeTodoBySelector(
-    toResolveInput({ id: input.id }),
-    true
-  );
+  const outcome = await completeTodoById(input.id, true);
   return buildOutcomeResponse(outcome);
 }
 
-export function registerCompleteTodo(server: McpServer): void {
+function registerCompleteTodo(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'complete_todo',
@@ -569,14 +564,14 @@ function buildDeleteResponse(todo: Todo): CallToolResult {
 async function handleDeleteTodo(
   input: DeleteTodoInput
 ): Promise<CallToolResult> {
-  const outcome = await deleteTodoBySelector(toResolveInput({ id: input.id }));
-  if (outcome.kind === 'error' || outcome.kind === 'ambiguous') {
+  const outcome = await deleteTodoById(input.id);
+  if (outcome.kind === 'error') {
     return outcome.response;
   }
   return buildDeleteResponse(outcome.todo);
 }
 
-export function registerDeleteTodo(server: McpServer): void {
+function registerDeleteTodo(server: McpServer): void {
   registerToolWithDiagnostics(
     server,
     'delete_todo',

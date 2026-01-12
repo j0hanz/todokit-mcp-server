@@ -1,58 +1,12 @@
 import { z, type ZodType } from 'zod';
 
-const ISO_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-interface IsoDateParts {
-  year: number;
-  month: number;
-  day: number;
-}
-
-function parseIsoDateParts(value: string): IsoDateParts | null {
-  const match = ISO_DATE_REGEX.exec(value);
-  if (!match) return null;
-  const [, yearPart, monthPart, dayPart] = match;
-  return {
-    year: Number(yearPart),
-    month: Number(monthPart),
-    day: Number(dayPart),
-  };
-}
-
-function isMatchingUtcDate({ year, month, day }: IsoDateParts): boolean {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  const actual = [
-    date.getUTCFullYear(),
-    date.getUTCMonth() + 1,
-    date.getUTCDate(),
-  ];
-  const expected = [year, month, day];
-  return expected.every((value, index) => value === actual[index]);
-}
-
-function isValidIsoDate(value: string): boolean {
-  const parts = parseIsoDateParts(value);
-  if (!parts) return false;
-  return isMatchingUtcDate(parts);
-}
-
-export const IsoDateSchema: ZodType<string> = z
-  .string()
-  .refine((value) => isValidIsoDate(value), {
-    error: 'Invalid date (YYYY-MM-DD)',
-  });
-
-export const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
+const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
   offset: true,
 });
 
 type Priority = 'low' | 'medium' | 'high';
 
-export const PrioritySchema: ZodType<Priority> = z.enum([
-  'low',
-  'medium',
-  'high',
-]);
+const PrioritySchema: ZodType<Priority> = z.enum(['low', 'medium', 'high']);
 
 export interface Todo {
   id: string;
@@ -66,7 +20,7 @@ export interface Todo {
   completedAt?: string | undefined;
 }
 
-export const TodoSchema: ZodType<Todo> = z.strictObject({
+const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   description: z.string(),
   completed: z.boolean(),
@@ -113,11 +67,7 @@ interface ListTodosFilterInput {
   status?: Status | undefined;
 }
 
-export const StatusSchema: ZodType<Status> = z.enum([
-  'pending',
-  'completed',
-  'all',
-]);
+const StatusSchema: ZodType<Status> = z.enum(['pending', 'completed', 'all']);
 
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   description: z.string().min(1).max(2000).describe('Description of the todo'),

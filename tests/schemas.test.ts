@@ -5,8 +5,6 @@ import {
   AddTodoSchema,
   DefaultOutputSchema,
   DeleteTodoSchema,
-  IsoDateSchema,
-  IsoDateTimeSchema,
   TodosSchema,
   UpdateTodoSchema,
 } from '../src/schema.js';
@@ -69,19 +67,19 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(result.success, false);
   });
 
-  it('validates ISO date-only strings', () => {
-    assert.equal(IsoDateSchema.safeParse('2025-02-28').success, true);
-    assert.equal(IsoDateSchema.safeParse('2025-02-30').success, false);
-    assert.equal(IsoDateSchema.safeParse('2025-2-3').success, false);
-  });
-
   it('validates ISO datetime strings with offset', () => {
     assert.equal(
-      IsoDateTimeSchema.safeParse('2025-02-28T10:30:00Z').success,
+      AddTodoSchema.safeParse({
+        description: 'Has due date',
+        dueAt: '2025-02-28T10:30:00Z',
+      }).success,
       true
     );
     assert.equal(
-      IsoDateTimeSchema.safeParse('2025-02-28 10:30:00Z').success,
+      AddTodoSchema.safeParse({
+        description: 'Bad due date',
+        dueAt: '2025-02-28 10:30:00Z',
+      }).success,
       false
     );
   });

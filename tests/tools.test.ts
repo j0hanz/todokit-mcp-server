@@ -4,16 +4,8 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodos, getTodos, readFileIfExists } from '../src/storage.js';
-import {
-  registerAddTodo,
-  registerAddTodos,
-  registerAllTools,
-  registerCompleteTodo,
-  registerDeleteTodo,
-  registerListTodos,
-  registerUpdateTodo,
-} from '../src/tools.js';
+import { addTodos, getTodos } from '../src/storage.js';
+import { registerAllTools } from '../src/tools.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
@@ -118,8 +110,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('adds single and batch todos', async () => {
     const { server, getHandler } = createToolHarness();
-    registerAddTodo(server);
-    registerAddTodos(server);
+    registerAllTools(server);
 
     const addHandler = getHandler<{ description: string }>('add_todo');
     const batchHandler = getHandler<{ items: { description: string }[] }>(
@@ -140,7 +131,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('lists todos with counts', async () => {
     const { server, getHandler } = createToolHarness();
-    registerListTodos(server);
+    registerAllTools(server);
 
     const [alpha, beta] = await addTodos([
       { description: 'Alpha task' },
@@ -166,7 +157,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('lists all todos when no filter specified', async () => {
     const { server, getHandler } = createToolHarness();
-    registerListTodos(server);
+    registerAllTools(server);
 
     const [first, second, third] = await addTodos([
       { description: 'First task' },
@@ -193,7 +184,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('lists empty results with summary', async () => {
     const { server, getHandler } = createToolHarness();
-    registerListTodos(server);
+    registerAllTools(server);
 
     const listHandler = getHandler<Record<string, never>>('list_todos');
     const result = await listHandler({});
@@ -209,8 +200,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('filters by completed status', async () => {
     const { server, getHandler } = createToolHarness();
-    registerListTodos(server);
-    registerCompleteTodo(server);
+    registerAllTools(server);
 
     const [pending, completed] = await addTodos([
       { description: 'Pending task' },
@@ -247,9 +237,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('updates, completes, and deletes todos', async () => {
     const { server, getHandler } = createToolHarness();
-    registerUpdateTodo(server);
-    registerCompleteTodo(server);
-    registerDeleteTodo(server);
+    registerAllTools(server);
 
     const [todo, extra] = await addTodos([
       { description: 'Manage this task' },
@@ -279,7 +267,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('handles update no-updates errors', async () => {
     const { server, getHandler } = createToolHarness();
-    registerUpdateTodo(server);
+    registerAllTools(server);
 
     const [todo] = await addTodos([{ description: 'Has description' }]);
     assert.ok(todo);
@@ -296,7 +284,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('completes todo and handles already completed state', async () => {
     const { server, getHandler } = createToolHarness();
-    registerCompleteTodo(server);
+    registerAllTools(server);
 
     const [todo, extra] = await addTodos([
       { description: 'Finish this task' },
@@ -331,7 +319,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('delete_todo requires exact id', async () => {
     const { server, getHandler } = createToolHarness();
-    registerDeleteTodo(server);
+    registerAllTools(server);
 
     const [todo1, todo2] = await addTodos([
       { description: 'Item one' },
@@ -355,7 +343,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('delete_todo returns error for non-existent id', async () => {
     const { server, getHandler } = createToolHarness();
-    registerDeleteTodo(server);
+    registerAllTools(server);
 
     await addTodos([{ description: 'Some item' }]);
 
@@ -368,7 +356,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('delete_todo is not marked idempotent', () => {
     const { server, getConfig } = createToolHarness();
-    registerDeleteTodo(server);
+    registerAllTools(server);
 
     const config = getConfig('delete_todo');
     assert.equal(

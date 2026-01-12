@@ -1,67 +1,50 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  addTodos,
-  getTodos,
-  type ResolveTodoInput,
-  resolveTodoTargetFromTodos,
-  toResolveInput,
-} from '../src/storage.js';
+import { addTodos, deleteTodoById, updateTodoById } from '../src/storage.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
 
-async function resolveTodoTarget(input: ResolveTodoInput) {
-  const todos = await getTodos();
-  return resolveTodoTargetFromTodos(todos, input);
-}
-
-describe('match resolution', { timeout: TEST_TIMEOUT_MS }, () => {
-  it('throws when no identifier provided', () => {
-    assert.throws(() => toResolveInput({}), /Provide id or query/);
-  });
-
-  it('resolves by id', async () => {
-    const [todo] = await addTodos([{ description: 'Match A task' }]);
-    assert.ok(todo);
-    const result = await resolveTodoTarget({ id: todo.id });
-    assert.equal(result.kind, 'match');
-    if (result.kind === 'match') {
-      assert.equal(result.todo.id, todo.id);
-    }
-  });
-
-  it('returns not_found for missing query', async () => {
-    const result = await resolveTodoTarget({ query: 'missing-query' });
-    assert.equal(result.kind, 'not_found');
-    if (result.kind === 'not_found') {
-      assert.equal(result.response.structuredContent.error.code, 'E_NOT_FOUND');
-    }
-  });
-
-  it('returns ambiguous for multiple matches', async () => {
-    await addTodos([
-      { description: 'Shared task one' },
-      { description: 'Shared task two' },
-    ]);
-
-    const result = await resolveTodoTarget({ query: 'Shared' });
-    assert.equal(result.kind, 'ambiguous');
-    if (result.kind === 'ambiguous') {
-      assert.equal(result.response.structuredContent.error.code, 'E_AMBIGUOUS');
-      assert.ok(result.previews.length > 0);
-    }
-  });
-
-  it('returns missing for blank query', async () => {
-    const result = await resolveTodoTarget({ query: '   ' });
-    assert.equal(result.kind, 'missing');
-    if (result.kind === 'missing') {
+describe('id-based matching', { timeout: TEST_TIMEOUT_MS }, () => {
+  it('returns not_found when updating a missing id', async () => {
+    const outcome = await updateTodoById('missing-id', () => ({
+      description: 'will not apply',
+    }));
+    assert.equal(outcome.kind, 'error');
+    if (outcome.kind === 'error') {
       assert.equal(
-        result.response.structuredContent.error.code,
-        'E_BAD_REQUEST'
+        outcome.response.structuredContent.error.code,
+        'E_NOT_FOUND'
       );
     }
+  });
+
+  it('returns not_found when deleting a missing id', async () => {
+    const outcome = await deleteTodoById('missing-id');
+    assert.equal(outcome.kind, 'error');
+    if (outcome.kind === 'error') {
+      assert.equal(
+        outcome.response.structuredContent.error.code,
+        'E_NOT_FOUND'
+      );
+    }
+  });
+
+  it('updates and deletes an existing id', async () => {
+    const [todo, extra] = await addTodos([
+      { description: 'Match test todo' },
+      { description: 'Keep pending to avoid auto-delete' },
+    ]);
+    assert.ok(todo);
+    assert.ok(extra);
+
+    const updated = await updateTodoById(todo.id, () => ({
+      description: 'Updated match test todo',
+    }));
+    assert.equal(updated.kind, 'match');
+
+    const deleted = await deleteTodoById(todo.id);
+    assert.equal(deleted.kind, 'match');
   });
 });

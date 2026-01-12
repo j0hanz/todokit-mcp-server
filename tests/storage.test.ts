@@ -1,59 +1,36 @@
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 import {
   addTodos,
-  completeTodoBySelector,
-  deleteTodoBySelector,
+  completeTodoById,
+  deleteTodoById,
   getTodos,
-  readFileIfExists,
-  updateTodoBySelector,
+  updateTodoById,
 } from '../src/storage.js';
 import './setup.js';
 
 const TEST_TIMEOUT_MS = 5000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+async function readTextIfExists(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, { encoding: 'utf8' });
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
 
 describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('generates uuid-like ids', async () => {
     const [todo] = await addTodos([{ description: 'ID Check test' }]);
     assert.ok(todo);
     assert.match(todo.id, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
-  });
-
-  it('adds todos and filters by query', async () => {
-    const [todoA, todoB, todoC] = await addTodos([
-      { description: 'Alpha description here', tags: ['WORK'] },
-      { description: 'Beta description here' },
-      { description: 'Gamma description here' },
-    ]);
-    assert.ok(todoA);
-    assert.ok(todoB);
-    assert.ok(todoC);
-
-    const byQuery = await getTodos({ query: 'alpha' });
-    assert.deepEqual(
-      byQuery.map((todo) => todo.id),
-      [todoA.id]
-    );
-
-    const byBeta = await getTodos({ query: 'beta' });
-    assert.deepEqual(
-      byBeta.map((todo) => todo.id),
-      [todoB.id]
-    );
-
-    const byTag = await getTodos({ query: 'work' });
-    assert.deepEqual(
-      byTag.map((todo) => todo.id),
-      [todoA.id]
-    );
-
-    const byMultiToken = await getTodos({ query: 'alpha work' });
-    assert.deepEqual(
-      byMultiToken.map((todo) => todo.id),
-      [todoA.id]
-    );
   });
 
   it('updates todo completion', async () => {
@@ -64,7 +41,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.ok(todo);
     assert.ok(extra);
 
-    const completed = await updateTodoBySelector({ id: todo.id }, () => ({
+    const completed = await updateTodoById(todo.id, () => ({
       completed: true,
     }));
     assert.equal(completed.kind, 'match');
@@ -74,7 +51,7 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(completed.todo.completed, true);
     assert.ok(completed.todo.completedAt);
 
-    const reopened = await updateTodoBySelector({ id: todo.id }, () => ({
+    const reopened = await updateTodoById(todo.id, () => ({
       completed: false,
     }));
     assert.equal(reopened.kind, 'match');
@@ -88,10 +65,10 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
   it('deletes todos', async () => {
     const [todo] = await addTodos([{ description: 'Epsilon delete test' }]);
     assert.ok(todo);
-    const deleted = await deleteTodoBySelector({ id: todo.id });
+    const deleted = await deleteTodoById(todo.id);
     assert.equal(deleted.kind, 'match');
 
-    const missing = await deleteTodoBySelector({ id: 'missing' });
+    const missing = await deleteTodoById('missing');
     assert.equal(missing.kind, 'error');
 
     const remaining = await getTodos();
@@ -106,39 +83,6 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     await Promise.all(items.map((item) => addTodos([item])));
     const todos = await getTodos();
     assert.equal(todos.length, count);
-  });
-
-  it('preserves AbortError semantics for aborted reads', async () => {
-    const todoFile = process.env.TODOKIT_TODO_FILE;
-    assert.ok(todoFile);
-
-    await writeFile(todoFile, 'hello', { encoding: 'utf8' });
-    const controller = new AbortController();
-    controller.abort();
-
-    await assert.rejects(
-      () => readFileIfExists(todoFile, 10_000, controller.signal),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.name === 'AbortError' &&
-        !String(error.message).includes('File read timed out')
-    );
-  });
-
-  it('maps internal timeouts to AbortError', async () => {
-    const todoFile = process.env.TODOKIT_TODO_FILE;
-    assert.ok(todoFile);
-
-    const payload = 'a'.repeat(10_000_000);
-    await writeFile(todoFile, payload, { encoding: 'utf8' });
-
-    await assert.rejects(
-      () => readFileIfExists(todoFile, 0),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.name === 'AbortError' &&
-        String(error.message).includes('File read timed out')
-    );
   });
 
   it('rejects oversized todo storage files', async () => {
@@ -210,12 +154,12 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.ok(first);
     assert.ok(second);
 
-    await completeTodoBySelector({ id: first.id }, true);
-    const stillThere = await readFileIfExists(todoFile, 2_000);
+    await completeTodoById(first.id, true);
+    const stillThere = await readTextIfExists(todoFile);
     assert.ok(stillThere);
 
-    await completeTodoBySelector({ id: second.id }, true);
-    const deleted = await readFileIfExists(todoFile, 2_000);
+    await completeTodoById(second.id, true);
+    const deleted = await readTextIfExists(todoFile);
     assert.equal(deleted, null);
 
     const remaining = await getTodos();
@@ -241,10 +185,10 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
       encoding: 'utf8',
     });
 
-    const outcome = await completeTodoBySelector({ id: 'completed-1' }, true);
+    const outcome = await completeTodoById('completed-1', true);
     assert.equal(outcome.kind, 'already');
 
-    const deleted = await readFileIfExists(todoFile, 2_000);
+    const deleted = await readTextIfExists(todoFile);
     assert.equal(deleted, null);
   });
 });

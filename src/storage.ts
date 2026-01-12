@@ -18,7 +18,7 @@ function getErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
-export function isNotFoundError(error: unknown): boolean {
+function isNotFoundError(error: unknown): boolean {
   return getErrorCode(error) === 'ENOENT';
 }
 
@@ -27,7 +27,7 @@ function isTransientError(error: unknown): boolean {
   return code !== undefined && TRANSIENT_ERROR_CODES.has(code);
 }
 
-export function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
@@ -57,7 +57,7 @@ async function withTimeout<T>(
   }
 }
 
-export async function getFileMtime(
+async function getFileMtime(
   path: string,
   timeoutMs: number
 ): Promise<number | null> {
@@ -115,7 +115,7 @@ async function getFileSize(
   }
 }
 
-export async function readFileIfExists(
+async function readFileIfExists(
   path: string,
   timeoutMs: number,
   signal?: AbortSignal
@@ -164,7 +164,7 @@ async function renameWithRetryCount(from: string, to: string): Promise<number> {
   return retries;
 }
 
-export async function writeFileAtomic(
+async function writeFileAtomic(
   path: string,
   contents: string,
   timeoutMs: number
@@ -360,7 +360,7 @@ function publishReadEvent(
   });
 }
 
-export async function readTodos(): Promise<readonly Todo[]> {
+async function readTodos(): Promise<readonly Todo[]> {
   const start = nowMs();
   await writeQueue;
   const path = getTodoFilePath();
@@ -381,7 +381,7 @@ export async function readTodos(): Promise<readonly Todo[]> {
   return todos;
 }
 
-export async function withTodos<T>(
+async function withTodos<T>(
   mutate: (todos: Todo[]) => { todos: Todo[]; result: T }
 ): Promise<T> {
   return withTodoFileUpdate((todos) => {
@@ -540,229 +540,9 @@ export async function closeDb(): Promise<void> {
   });
 }
 
-export interface TodoFilters {
-  completed?: boolean | undefined;
-  query?: string | undefined;
-}
-
-function tokenizeQuery(value: string): string[] {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return [];
-  return (trimmed.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
-    (token) => token.length > 0
-  );
-}
-
-export function filterTodos(
-  todos: readonly Todo[],
-  filters: TodoFilters
-): readonly Todo[] {
-  const { completed, query: rawQuery } = filters;
-  const hasCompletedFilter = completed !== undefined;
-  const trimmedQuery = rawQuery?.trim();
-  const queryTokens = trimmedQuery ? tokenizeQuery(trimmedQuery) : [];
-
-  if (!hasCompletedFilter && queryTokens.length === 0) {
-    return todos;
-  }
-
-  const matches: Todo[] = [];
-  for (const todo of todos) {
-    if (!matchesCompleted(todo, hasCompletedFilter, completed)) continue;
-    if (!matchesQuery(todo, queryTokens)) continue;
-    matches.push(todo);
-  }
-  return matches;
-}
-
-function matchesCompleted(
-  todo: Todo,
-  hasCompletedFilter: boolean,
-  completed: boolean | undefined
-): boolean {
-  if (!hasCompletedFilter) return true;
-  return todo.completed === completed;
-}
-
-function matchesQuery(todo: Todo, queryTokens: readonly string[]): boolean {
-  if (queryTokens.length === 0) return true;
-
-  const description = todo.description.toLowerCase();
-  const tags = todo.tags ?? [];
-
-  const hasToken = (token: string): boolean => {
-    if (token.length === 0) return false;
-    if (description.includes(token)) return true;
-
-    for (const tag of tags) {
-      if (tag.toLowerCase().includes(token)) return true;
-    }
-
-    return false;
-  };
-
-  // Preserve the previous behavior for single-token queries.
-  if (queryTokens.length === 1) {
-    const [token] = queryTokens;
-    return token ? hasToken(token) : true;
-  }
-
-  // Token-based AND matching is more forgiving for word order.
-  return queryTokens.every((token) => hasToken(token));
-}
-
-export interface TodoMatchPreview {
-  id: string;
-  description: string;
-  completed: boolean;
-}
-
-const PREVIEW_LIMIT = 5;
-
-function buildMatchPreviews(
-  todos: readonly Todo[],
-  limit: number = PREVIEW_LIMIT
-): TodoMatchPreview[] {
-  return todos.slice(0, limit).map((todo) => ({
-    id: todo.id,
-    description: todo.description,
-    completed: todo.completed,
-  }));
-}
-
-export type ResolveTodoInput =
-  | { id: string; query?: never }
-  | { query: string; id?: never };
-
-export function toResolveInput(input: {
-  id?: string;
-  query?: string;
-}): ResolveTodoInput {
-  if (input.id) {
-    return { id: input.id };
-  }
-  if (input.query) {
-    return { query: input.query };
-  }
-  throw new Error('Provide id or query to identify the todo');
-}
-
-export type ResolveTodoResult =
-  | { kind: 'match'; todo: Todo }
-  | { kind: 'missing'; response: ErrorResponse }
-  | { kind: 'not_found'; response: ErrorResponse }
-  | {
-      kind: 'ambiguous';
-      response: ErrorResponse;
-      matches: readonly Todo[];
-      previews: readonly TodoMatchPreview[];
-      query: string;
-    };
-
 export type MatchOutcome =
   | { kind: 'match'; todo: Todo }
-  | {
-      kind: 'ambiguous';
-      response: ErrorResponse;
-      matches: readonly Todo[];
-      previews: readonly TodoMatchPreview[];
-      query: string;
-    }
   | { kind: 'error'; response: ErrorResponse };
-
-export function unwrapResolution(result: ResolveTodoResult): MatchOutcome {
-  if (result.kind === 'match') {
-    return result;
-  }
-  if (result.kind === 'ambiguous') {
-    return result;
-  }
-  return { kind: 'error', response: result.response };
-}
-
-function createMissingIdentifierError(): ErrorResponse {
-  return createErrorResponse(
-    'E_BAD_REQUEST',
-    'Provide id or query to identify the todo'
-  );
-}
-
-function createNotFoundError(target: string): ErrorResponse {
-  return createErrorResponse('E_NOT_FOUND', `Todo "${target}" not found`);
-}
-
-function createAmbiguousError(
-  query: string,
-  matches: readonly Todo[]
-): { response: ErrorResponse; previews: readonly TodoMatchPreview[] } {
-  const previews = buildMatchPreviews(matches);
-  const candidateIds = previews.map((preview) => preview.id);
-  let idsMessage = '';
-  if (candidateIds.length > 0) {
-    idsMessage = ` Candidates: ${candidateIds.join(', ')}`;
-    if (matches.length > candidateIds.length) {
-      idsMessage += ', ...';
-    }
-  }
-  const response = createErrorResponse(
-    'E_AMBIGUOUS',
-    `Multiple todos match "${query}".${idsMessage}`,
-    {
-      matches: previews,
-      candidateIds,
-      totalMatches: matches.length,
-      hint: `Multiple todos match "${query}". Use an id from candidateIds for an exact match.`,
-    }
-  );
-  return { response, previews };
-}
-
-function resolveByIdFromTodos(
-  todos: readonly Todo[],
-  id: string
-): ResolveTodoResult {
-  const match = todos.find((todo) => todo.id === id);
-  if (!match) {
-    return { kind: 'not_found', response: createNotFoundError(id) };
-  }
-  return { kind: 'match', todo: match };
-}
-
-function resolveByQueryFromTodos(
-  todos: readonly Todo[],
-  query: string
-): ResolveTodoResult {
-  const trimmedQuery = query.trim();
-  if (trimmedQuery.length === 0) {
-    return { kind: 'missing', response: createMissingIdentifierError() };
-  }
-  const matches = filterTodos(todos, { query: trimmedQuery });
-  const [firstMatch] = matches;
-  if (matches.length === 1 && firstMatch) {
-    return { kind: 'match', todo: firstMatch };
-  }
-  if (matches.length === 0) {
-    return { kind: 'not_found', response: createNotFoundError(trimmedQuery) };
-  }
-  const { response, previews } = createAmbiguousError(trimmedQuery, matches);
-  return {
-    kind: 'ambiguous',
-    response,
-    matches,
-    previews,
-    query: trimmedQuery,
-  };
-}
-
-export function resolveTodoTargetFromTodos(
-  todos: readonly Todo[],
-  input: ResolveTodoInput
-): ResolveTodoResult {
-  if (input.id !== undefined) {
-    return resolveByIdFromTodos(todos, input.id);
-  }
-  return resolveByQueryFromTodos(todos, input.query);
-}
 
 export interface TodoUpdate {
   description?: string;
@@ -772,7 +552,7 @@ export interface TodoUpdate {
   dueAt?: Todo['dueAt'];
 }
 
-export function createNotFoundOutcome(id: string): MatchOutcome {
+function createNotFoundOutcome(id: string): MatchOutcome {
   return {
     kind: 'error',
     response: createErrorResponse(
@@ -834,11 +614,8 @@ function hasChanges(current: Todo, updates: TodoUpdate): boolean {
   });
 }
 
-export async function getTodos(
-  filters?: TodoFilters
-): Promise<readonly Todo[]> {
-  const todos = await readTodos();
-  return filters ? filterTodos(todos, filters) : todos;
+export async function getTodos(): Promise<readonly Todo[]> {
+  return readTodos();
 }
 
 function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
@@ -920,85 +697,60 @@ function buildUpdateOutcome(
 
 export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
 
-export async function updateTodoBySelector(
-  input: ResolveTodoInput,
+export async function updateTodoById(
+  id: string,
   buildUpdates: (todo: Todo) => TodoUpdate | null
 ): Promise<UpdateTodoOutcome> {
   return withTodos<UpdateTodoOutcome>((todos) => {
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') {
-      return { todos, result: outcome };
+    const match = todos.find((todo) => todo.id === id);
+    if (!match) {
+      return { todos, result: createNotFoundOutcome(id) };
     }
 
-    const updates = buildUpdates(outcome.todo);
+    const updates = buildUpdates(match);
     if (!updates || Object.keys(updates).length === 0) {
       return { todos, result: { kind: 'no_updates' } };
     }
 
-    const updated = applyUpdateToTodos(todos, outcome.todo.id, updates);
-    return buildUpdateOutcome(updated, outcome.todo.id);
+    const updated = applyUpdateToTodos(todos, match.id, updates);
+    return buildUpdateOutcome(updated, match.id);
   });
 }
 
-export async function deleteTodoBySelector(
-  input: ResolveTodoInput
-): Promise<MatchOutcome> {
+export async function deleteTodoById(id: string): Promise<MatchOutcome> {
   return withTodos<MatchOutcome>((todos) => {
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') {
-      return { todos, result: outcome };
+    const match = todos.find((todo) => todo.id === id);
+    if (!match) {
+      return { todos, result: createNotFoundOutcome(id) };
     }
 
-    const remaining = todos.filter((todo) => todo.id !== outcome.todo.id);
+    const remaining = todos.filter((todo) => todo.id !== match.id);
     if (remaining.length === todos.length) {
       return {
         todos,
-        result: createNotFoundOutcome(outcome.todo.id),
+        result: createNotFoundOutcome(match.id),
       };
     }
 
-    return { todos: remaining, result: { kind: 'match', todo: outcome.todo } };
+    return { todos: remaining, result: { kind: 'match', todo: match } };
   });
 }
 
-export async function completeTodoBySelector(
-  input: ResolveTodoInput,
+export async function completeTodoById(
+  id: string,
   completed: boolean
 ): Promise<CompleteTodoOutcome> {
   return withTodos<CompleteTodoOutcome>((todos) => {
-    const outcome = unwrapResolution(resolveTodoTargetFromTodos(todos, input));
-    if (outcome.kind !== 'match') {
-      return { todos, result: outcome };
+    const match = todos.find((todo) => todo.id === id);
+    if (!match) {
+      return { todos, result: createNotFoundOutcome(id) };
     }
 
-    if (outcome.todo.completed === completed) {
-      return { todos, result: { kind: 'already', todo: outcome.todo } };
+    if (match.completed === completed) {
+      return { todos, result: { kind: 'already', todo: match } };
     }
 
-    const updated = applyUpdateToTodos(todos, outcome.todo.id, { completed });
-    return buildUpdateOutcome(updated, outcome.todo.id);
+    const updated = applyUpdateToTodos(todos, match.id, { completed });
+    return buildUpdateOutcome(updated, match.id);
   });
-}
-
-export function deleteTodosByIds(ids: string[]): Promise<string[]> {
-  const idsToDelete = new Set(ids);
-  return withTodos((todos) => {
-    const remaining: Todo[] = [];
-    const deletedIds: string[] = [];
-    for (const todo of todos) {
-      if (idsToDelete.has(todo.id)) {
-        deletedIds.push(todo.id);
-      } else {
-        remaining.push(todo);
-      }
-    }
-    return { todos: remaining, result: deletedIds };
-  });
-}
-
-export function deleteAllTodos(): Promise<string[]> {
-  return withTodoFileUpdate((todos) => ({
-    kind: 'delete_file',
-    result: todos.map((todo) => todo.id),
-  }));
 }
