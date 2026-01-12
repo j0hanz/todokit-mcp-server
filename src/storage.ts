@@ -357,37 +357,86 @@ export async function readTodos(): Promise<readonly Todo[]> {
 export async function withTodos<T>(
   mutate: (todos: Todo[]) => { todos: Todo[]; result: T }
 ): Promise<T> {
+  return withTodoFileUpdate((todos) => {
+    const { todos: nextTodos, result } = mutate(todos);
+    if (nextTodos === todos) {
+      return { kind: 'no_change', result };
+    }
+    return { kind: 'save', todos: nextTodos, result };
+  });
+}
+
+type TodoFileUpdate<T> =
+  | { kind: 'no_change'; result: T }
+  | { kind: 'save'; todos: Todo[]; result: T }
+  | { kind: 'delete_file'; result: T };
+
+async function deleteTodoFile(path: string): Promise<void> {
+  const start = nowMs();
+
+  await withTimeout(
+    rm(path, { force: true }),
+    WRITE_TIMEOUT_MS,
+    'File remove timed out'
+  ).catch((error: unknown) => {
+    if (isNotFoundError(error)) return;
+    throw error;
+  });
+
+  cache = { todos: [], mtimeMs: null };
+
+  publishStorageEvent({
+    v: 1,
+    kind: 'storage',
+    op: 'write',
+    at: new Date().toISOString(),
+    durationMs: Math.max(0, nowMs() - start),
+    todoCount: 0,
+    renameRetries: 0,
+  });
+}
+
+async function withTodoFileUpdate<T>(
+  work: (todos: Todo[]) => TodoFileUpdate<T>
+): Promise<T> {
   return enqueueWrite(async () => {
     const path = getTodoFilePath();
+
     for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
       const mtimeMs = await getFileMtime(path, IO_TIMEOUT_MS);
       const current =
         cache?.mtimeMs === mtimeMs ? cache.todos : await loadTodos(path);
       cache = { todos: current, mtimeMs };
 
-      const { todos, result } = mutate(current);
-
-      if (todos !== current) {
-        const release = await acquireWriteLock(path, getLockTimeoutMs());
-        try {
-          const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
-          if (latestMtime !== mtimeMs) {
-            if (attempt >= MAX_CONFLICT_RETRIES) {
-              throw createCodedError(
-                'E_STORAGE_CONFLICT',
-                'Todo storage changed during update; please retry.'
-              );
-            }
-            await delay(25 * (attempt + 1));
-            continue;
-          }
-
-          await saveTodos(path, todos);
-        } finally {
-          await release();
-        }
+      const outcome = work(current);
+      if (outcome.kind === 'no_change') {
+        return outcome.result;
       }
-      return result;
+
+      const release = await acquireWriteLock(path, getLockTimeoutMs());
+      try {
+        const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
+        if (latestMtime !== mtimeMs) {
+          if (attempt >= MAX_CONFLICT_RETRIES) {
+            throw createCodedError(
+              'E_STORAGE_CONFLICT',
+              'Todo storage changed during update; please retry.'
+            );
+          }
+          await delay(25 * (attempt + 1));
+          continue;
+        }
+
+        if (outcome.kind === 'save') {
+          await saveTodos(path, outcome.todos);
+        } else {
+          await deleteTodoFile(path);
+        }
+
+        return outcome.result;
+      } finally {
+        await release();
+      }
     }
 
     throw createCodedError(
@@ -797,8 +846,8 @@ export function deleteTodosByIds(ids: string[]): Promise<string[]> {
 }
 
 export function deleteAllTodos(): Promise<string[]> {
-  return withTodos((todos) => {
-    const deletedIds = todos.map((todo) => todo.id);
-    return { todos: [], result: deletedIds };
-  });
+  return withTodoFileUpdate((todos) => ({
+    kind: 'delete_file',
+    result: todos.map((todo) => todo.id),
+  }));
 }

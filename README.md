@@ -231,6 +231,8 @@ Result fields:
 
 Delete all todos from the list.
 
+This also removes the configured todo storage file (defaults to `todos.json`), so the next read starts from an empty list.
+
 | Parameter | Type | Required | Default | Description |
 | :-------- | :--- | :------- | :------ | :---------- |
 | (none)    | -    | -        | -       | -           |

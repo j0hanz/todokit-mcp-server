@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { addTodos, getTodos } from '../src/storage.js';
+import { addTodos, getTodos, readFileIfExists } from '../src/storage.js';
 import {
   registerAddTodo,
   registerAddTodos,
@@ -350,6 +350,11 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
 
     const remaining = await getTodos();
     assert.equal(remaining.length, 0);
+
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+    const stored = await readFileIfExists(todoFile, 2_000);
+    assert.equal(stored, null);
   });
 
   it('delete_todo requires exact id', async () => {
