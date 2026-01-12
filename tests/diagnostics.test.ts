@@ -99,6 +99,17 @@ describe('diagnostics', { timeout: TEST_TIMEOUT_MS }, () => {
           return event.kind === 'storage';
         })
       );
+
+      assert.ok(
+        storageEvents.some((event) => {
+          if (!isRecord(event)) return false;
+          return (
+            event.kind === 'storage' &&
+            event.requestId === callId &&
+            event.tool === 'add_todo'
+          );
+        })
+      );
     } finally {
       unsubscribe('todokit:tool', onTool);
       unsubscribe('todokit:storage', onStorage);

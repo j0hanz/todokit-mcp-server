@@ -6,6 +6,8 @@ import {
 } from 'node:diagnostics_channel';
 import { performance } from 'node:perf_hooks';
 
+import { getRequestContext } from './requestContext.js';
+
 export interface ToolCallEvent {
   v: 1;
   kind: 'tool_call';
@@ -30,6 +32,8 @@ export interface StorageEvent {
   v: 1;
   kind: 'storage';
   op: 'read' | 'write' | 'close';
+  requestId?: string | undefined;
+  tool?: string | undefined;
   at: string;
   durationMs?: number | undefined;
   cacheHit?: boolean | undefined;
@@ -109,6 +113,15 @@ export function publishToolResult(event: ToolResultEvent): void {
 }
 
 export function publishStorageEvent(event: StorageEvent): void {
+  const context = getRequestContext();
+  if (context) {
+    safePublish(storageDiagnosticsChannel, {
+      ...event,
+      requestId: event.requestId ?? context.requestId,
+      tool: event.tool ?? context.tool,
+    });
+    return;
+  }
   safePublish(storageDiagnosticsChannel, event);
 }
 

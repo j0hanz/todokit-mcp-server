@@ -23,6 +23,7 @@ import {
   publishToolCallWithId,
   publishToolResult,
 } from './diagnostics.js';
+import { runWithRequestContext } from './requestContext.js';
 import {
   createErrorResponse,
   createToolResponse,
@@ -142,7 +143,9 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     const start = nowMs();
     let result: CallToolResult | Promise<CallToolResult>;
     try {
-      result = handler(input, extra);
+      result = runWithRequestContext({ requestId, tool }, () =>
+        handler(input, extra)
+      );
     } catch (error: unknown) {
       publishFailureResult(tool, requestId, start);
       const rejection =
