@@ -64,7 +64,7 @@
     "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unused-imports": "^4.3.0",
     "knip": "^5.80.2",
-    "jscpd": "4.0.5",
+    "jscpd": "4.0.7",
     "prettier": "^3.7.4",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
