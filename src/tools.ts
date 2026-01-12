@@ -16,7 +16,7 @@ import type {
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import {
   nowMs,
@@ -43,7 +43,6 @@ import {
   addTodos,
   completeTodoBySelector,
   type CompleteTodoOutcome,
-  deleteAllTodos,
   deleteTodoBySelector,
   getCodedErrorCode,
   getTodos,
@@ -218,7 +217,8 @@ function buildAddTodosResponse(todos: Todo[]): CallToolResult {
 }
 
 const addTodoToolConfig = {
-  description: 'Add a new todo item',
+  description:
+    "Create a new task. Use this for single items. For multiple items, prefer 'add_todos' to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.",
   inputSchema: AddTodoSchema,
   outputSchema: DefaultOutputSchema,
   annotations: {
@@ -228,9 +228,9 @@ const addTodoToolConfig = {
 };
 
 async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
-  const { description } = input;
+  const { description, priority, tags, dueAt } = input;
   try {
-    const todos = await addTodos([{ description }]);
+    const todos = await addTodos([{ description, priority, tags, dueAt }]);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     const mapped = mapExecutionError(err, 'E_ADD_TODO');
@@ -251,7 +251,8 @@ type AddTodosInput = z.infer<typeof AddTodosSchema>;
 
 const addTodosToolConfig = {
   title: 'Add Todos (Batch)',
-  description: 'Add multiple todo items in one call',
+  description:
+    'Create multiple tasks in one call to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.',
   inputSchema: AddTodosSchema,
   outputSchema: DefaultOutputSchema,
   annotations: {
@@ -281,6 +282,8 @@ export function registerAddTodos(server: McpServer): void {
 
 type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
 
+type ListTodoStatus = 'pending' | 'completed' | 'all';
+
 interface CountSummary {
   total: number;
   completed: number;
@@ -306,28 +309,51 @@ function buildSummary(counts: CountSummary): string {
   return `Found ${String(counts.total)} todos (${String(counts.pending)} pending, ${String(counts.completed)} completed)`;
 }
 
-function resolveCompletedFilter(
-  status: ListTodosFilters['status']
-): boolean | undefined {
-  if (status === 'pending') return false;
-  if (status === 'completed') return true;
-  return undefined;
+function resolveStatus(status: ListTodosFilters['status']): ListTodoStatus {
+  return status ?? 'pending';
 }
 
-function buildListResponse(
-  todos: readonly Todo[],
-  counts: CountSummary
-): CallToolResult {
+function buildListHint(status: ListTodoStatus, remaining: number): string {
+  if (remaining <= 0) {
+    return 'Tip: when all todos are completed, the storage file is automatically deleted.';
+  }
+  if (status === 'all') {
+    return `...and ${String(remaining)} more. Narrow the list by using status='pending' or status='completed', or operate by ID.`;
+  }
+  return `...and ${String(remaining)} more. Use status='all' to include completed items, or operate by ID.`;
+}
+
+function buildListResponse(params: {
+  items: readonly Todo[];
+  counts: CountSummary;
+  filteredCounts: CountSummary;
+  status: ListTodoStatus;
+  returned: number;
+  truncated: boolean;
+  remaining: number;
+  summary: string;
+  hint: string;
+}): CallToolResult {
   return createToolResponse({
     ok: true,
     result: {
-      items: todos,
-      summary: buildSummary(counts),
+      items: params.items,
+      summary: params.summary,
       counts: {
-        total: counts.total,
-        pending: counts.pending,
-        completed: counts.completed,
+        total: params.counts.total,
+        pending: params.counts.pending,
+        completed: params.counts.completed,
       },
+      filteredCounts: {
+        total: params.filteredCounts.total,
+        pending: params.filteredCounts.pending,
+        completed: params.filteredCounts.completed,
+      },
+      status: params.status,
+      returned: params.returned,
+      truncated: params.truncated,
+      remaining: params.remaining,
+      hint: params.hint,
     },
   });
 }
@@ -335,10 +361,45 @@ function buildListResponse(
 async function handleListTodos(
   filters: ListTodosFilters
 ): Promise<CallToolResult> {
-  const completed = resolveCompletedFilter(filters.status);
-  const allTodos = await getTodos({ completed });
+  const allTodos = await getTodos();
   const counts = computeCounts(allTodos);
-  return buildListResponse(allTodos, counts);
+
+  const status = resolveStatus(filters.status);
+  let filtered: Todo[];
+  if (status === 'pending') {
+    filtered = allTodos.filter((todo) => !todo.completed);
+  } else if (status === 'completed') {
+    filtered = allTodos.filter((todo) => todo.completed);
+  } else {
+    filtered = [...allTodos];
+  }
+  const filteredCounts = computeCounts(filtered);
+
+  const limit = 50;
+  const items = filtered.slice(0, limit);
+  const truncated = filtered.length > items.length;
+  const remaining = Math.max(0, filtered.length - items.length);
+
+  let summary: string;
+  if (filteredCounts.total === 0) {
+    summary = 'No todos found';
+  } else if (truncated) {
+    summary = `Showing ${String(items.length)} of ${String(filteredCounts.total)} ${status} todos (${buildSummary(counts)})`;
+  } else {
+    summary = `Showing ${String(filteredCounts.total)} ${status} todos (${buildSummary(counts)})`;
+  }
+
+  return buildListResponse({
+    items,
+    counts,
+    filteredCounts,
+    status,
+    returned: items.length,
+    truncated,
+    remaining,
+    summary,
+    hint: buildListHint(status, remaining),
+  });
 }
 
 export function registerListTodos(server: McpServer): void {
@@ -347,7 +408,8 @@ export function registerListTodos(server: McpServer): void {
     'list_todos',
     {
       title: 'List Todos',
-      description: 'List all todos with optional status filter',
+      description:
+        "List todos with an optional status filter. Default is status='pending' to keep responses short; use status='all' to include completed. Note: the storage file is automatically deleted when all tasks are marked as completed.",
       inputSchema: ListTodosFilterSchema,
       outputSchema: DefaultOutputSchema,
       annotations: {
@@ -372,6 +434,9 @@ type UpdateFields = TodoUpdate;
 function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
   const updates: UpdateFields = {};
   if (input.description !== undefined) updates.description = input.description;
+  if (input.priority !== undefined) updates.priority = input.priority;
+  if (input.tags !== undefined) updates.tags = input.tags;
+  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
   return Object.keys(updates).length > 0 ? updates : null;
 }
 
@@ -537,47 +602,6 @@ export function registerDeleteTodo(server: McpServer): void {
   );
 }
 
-async function handleDeleteTodos(): Promise<CallToolResult> {
-  const deletedIds = await deleteAllTodos();
-  return createToolResponse({
-    ok: true,
-    result: {
-      deletedIds,
-      summary:
-        deletedIds.length === 0
-          ? 'No todos to delete'
-          : `Deleted ${String(deletedIds.length)} todos`,
-      nextActions: ['add_todo'],
-    },
-  });
-}
-
-export function registerClearTodos(server: McpServer): void {
-  registerToolWithDiagnostics(
-    server,
-    'clear_todos',
-    {
-      title: 'Clear All Todos',
-      description: 'Delete all todos from the list',
-      inputSchema: z.strictObject({}),
-      outputSchema: DefaultOutputSchema,
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: true,
-        destructiveHint: true,
-      },
-    },
-    async () => {
-      try {
-        return await handleDeleteTodos();
-      } catch (err) {
-        const mapped = mapExecutionError(err, 'E_CLEAR_TODOS');
-        return createErrorResponse(mapped.code, mapped.message);
-      }
-    }
-  );
-}
-
 const TOOL_REGISTRATIONS: ((server: McpServer) => void)[] = [
   registerAddTodo,
   registerAddTodos,
@@ -585,7 +609,6 @@ const TOOL_REGISTRATIONS: ((server: McpServer) => void)[] = [
   registerUpdateTodo,
   registerCompleteTodo,
   registerDeleteTodo,
-  registerClearTodos,
 ];
 
 export function registerAllTools(server: McpServer): void {

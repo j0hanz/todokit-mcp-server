@@ -96,7 +96,7 @@ The repo includes additional implementation rules for MCP servers:
 
 - Stdio MCP server rule: do not write non-protocol output to stdout; diagnostics/logging (when enabled) goes to stderr.
 - Storage writes:
-  - Tools can modify/delete data in the configured JSON file (notably `clear_todos` deletes all items).
+  - Tools can modify/delete data in the configured JSON file.
   - Be careful when changing defaults around `TODOKIT_TODO_FILE` or write behavior.
 - Secrets:
   - Do not commit credentials or tokens.

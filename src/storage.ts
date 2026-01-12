@@ -511,6 +511,14 @@ export interface TodoFilters {
   query?: string | undefined;
 }
 
+function tokenizeQuery(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return [];
+  return (trimmed.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+    (token) => token.length > 0
+  );
+}
+
 export function filterTodos(
   todos: readonly Todo[],
   filters: TodoFilters
@@ -518,19 +526,50 @@ export function filterTodos(
   const { completed, query: rawQuery } = filters;
   const hasCompletedFilter = completed !== undefined;
   const trimmedQuery = rawQuery?.trim();
-  const query = trimmedQuery?.toLowerCase();
+  const queryTokens = trimmedQuery ? tokenizeQuery(trimmedQuery) : [];
 
-  if (!hasCompletedFilter && !query) {
+  if (!hasCompletedFilter && queryTokens.length === 0) {
     return todos;
   }
 
   const matches: Todo[] = [];
   for (const todo of todos) {
-    if (hasCompletedFilter && todo.completed !== completed) continue;
-    if (query && !todo.description.toLowerCase().includes(query)) continue;
+    if (!matchesCompleted(todo, hasCompletedFilter, completed)) continue;
+    if (!matchesQuery(todo, queryTokens)) continue;
     matches.push(todo);
   }
   return matches;
+}
+
+function matchesCompleted(
+  todo: Todo,
+  hasCompletedFilter: boolean,
+  completed: boolean | undefined
+): boolean {
+  if (!hasCompletedFilter) return true;
+  return todo.completed === completed;
+}
+
+function matchesQuery(todo: Todo, queryTokens: readonly string[]): boolean {
+  if (queryTokens.length === 0) return true;
+
+  const description = todo.description.toLowerCase();
+  const tags = (todo.tags ?? []).map((tag) => tag.toLowerCase());
+
+  const hasToken = (token: string): boolean => {
+    if (token.length === 0) return false;
+    if (description.includes(token)) return true;
+    return tags.some((tag) => tag.includes(token));
+  };
+
+  // Preserve the previous behavior for single-token queries.
+  if (queryTokens.length === 1) {
+    const [token] = queryTokens;
+    return token ? hasToken(token) : true;
+  }
+
+  // Token-based AND matching is more forgiving for word order.
+  return queryTokens.every((token) => hasToken(token));
 }
 
 export interface TodoMatchPreview {
@@ -618,13 +657,22 @@ function createAmbiguousError(
   matches: readonly Todo[]
 ): { response: ErrorResponse; previews: readonly TodoMatchPreview[] } {
   const previews = buildMatchPreviews(matches);
+  const candidateIds = previews.map((preview) => preview.id);
+  let idsMessage = '';
+  if (candidateIds.length > 0) {
+    idsMessage = ` Candidates: ${candidateIds.join(', ')}`;
+    if (matches.length > candidateIds.length) {
+      idsMessage += ', ...';
+    }
+  }
   const response = createErrorResponse(
     'E_AMBIGUOUS',
-    `Multiple todos match "${query}"`,
+    `Multiple todos match "${query}".${idsMessage}`,
     {
       matches: previews,
+      candidateIds,
       totalMatches: matches.length,
-      hint: `Multiple todos match "${query}". Use id for an exact match.`,
+      hint: `Multiple todos match "${query}". Use an id from candidateIds for an exact match.`,
     }
   );
   return { response, previews };
@@ -680,6 +728,9 @@ export function resolveTodoTargetFromTodos(
 export interface TodoUpdate {
   description?: string;
   completed?: boolean;
+  priority?: Todo['priority'];
+  tags?: Todo['tags'];
+  dueAt?: Todo['dueAt'];
 }
 
 export function createNotFoundOutcome(id: string): MatchOutcome {
@@ -698,6 +749,19 @@ export type CompleteTodoOutcome =
 
 interface NewTodoInput {
   description: string;
+  priority?: Todo['priority'] | undefined;
+  tags?: Todo['tags'] | undefined;
+  dueAt?: Todo['dueAt'] | undefined;
+}
+
+function normalizeTags(
+  tags: Todo['tags'] | undefined
+): Todo['tags'] | undefined {
+  if (!tags) return undefined;
+  const normalized = tags
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  return normalized;
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
@@ -743,6 +807,9 @@ function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
     id: randomUUID(),
     description: item.description,
     completed: false,
+    priority: item.priority,
+    tags: normalizeTags(item.tags),
+    dueAt: item.dueAt,
     createdAt: timestamp,
     updatedAt: timestamp,
     completedAt: undefined,

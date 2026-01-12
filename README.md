@@ -18,7 +18,7 @@ An MCP server for Todokit, a task management and productivity tool with JSON sto
 
 - Task management: add, update, complete, and delete todos.
 - Batch operations: add multiple todos at once.
-- Simple filtering: status-based filtering for lists.
+- Safe listing: status-based filtering with a default of pending-only and truncation to keep responses small.
 - JSON persistence with queued writes and atomic file writes.
 - Optional diagnostics events (tool calls/results, storage, lifecycle) via Node diagnostics channels.
 
@@ -142,11 +142,14 @@ The `result` shape is tool-specific.
 
 ### add_todo
 
-Add a new todo item.
+Create a new todo item.
 
-| Parameter   | Type   | Required | Description                            |
-| :---------- | :----- | :------- | :------------------------------------- |
-| description | string | Yes      | Description of the todo (1-2000 chars) |
+| Parameter   | Type     | Required | Description                                                           |
+| :---------- | :------- | :------- | :-------------------------------------------------------------------- |
+| description | string   | Yes      | Description of the todo (1-2000 chars)                                |
+| priority    | string   | No       | Priority: `low`, `medium`, `high`                                     |
+| tags        | string[] | No       | Optional tags (e.g., `["work", "bug"]`)                               |
+| dueAt       | string   | No       | Optional due date/time as an ISO 8601 timestamp with offset (RFC3339) |
 
 Result fields:
 
@@ -158,9 +161,9 @@ Result fields:
 
 Add multiple todo items in one call.
 
-| Parameter | Type  | Required | Description                                            |
-| :-------- | :---- | :------- | :----------------------------------------------------- |
-| items     | array | Yes      | Array of objects with `description` field (1-50 items) |
+Parameters:
+
+- `items` (array, required): Array of todo objects (1-50 items). Each item supports `description`, `priority`, `tags`, `dueAt`.
 
 Result fields:
 
@@ -170,26 +173,36 @@ Result fields:
 
 ### list_todos
 
-List all todos with optional status filter.
+List todos with an optional status filter.
 
 | Parameter | Type   | Required | Default | Description                               |
 | :-------- | :----- | :------- | :------ | :---------------------------------------- |
-| status    | string | No       | all     | Filter by status: pending, completed, all |
+| status    | string | No       | pending | Filter by status: pending, completed, all |
+
+Notes:
+
+- Results may be truncated for safety (currently returns up to 50 items). Use `status: "pending"` (default) or `status: "completed"` to narrow the response.
 
 Result fields:
 
 - `items` (todos)
 - `summary`
-- `counts` (`total`, `pending`, `completed`)
+- `counts` (`total`, `pending`, `completed`) — global counts across all todos
+- `filteredCounts` (`total`, `pending`, `completed`) — counts within the requested status filter
+- `status` (the effective status filter)
+- `returned`, `truncated`, `remaining`, `hint`
 
 ### update_todo
 
 Update fields on a todo item.
 
-| Parameter   | Type   | Required | Description                    |
-| :---------- | :----- | :------- | :----------------------------- |
-| id          | string | Yes      | The ID of the todo to update   |
-| description | string | No       | New description (1-2000 chars) |
+| Parameter   | Type     | Required | Description                                  |
+| :---------- | :------- | :------- | :------------------------------------------- |
+| id          | string   | Yes      | The ID of the todo to update                 |
+| description | string   | No       | New description (1-2000 chars)               |
+| priority    | string   | No       | New priority: `low`, `medium`, `high`        |
+| tags        | string[] | No       | Replace tags for this todo                   |
+| dueAt       | string   | No       | Replace due date/time (ISO 8601 with offset) |
 
 Notes:
 
@@ -229,22 +242,6 @@ Result fields:
 - `summary`
 - `nextActions`
 
-### clear_todos
-
-Delete all todos from the list.
-
-This also removes the configured todo storage file (defaults to `todos.json`), so the next read starts from an empty list.
-
-| Parameter | Type | Required | Default | Description |
-| :-------- | :--- | :------- | :------ | :---------- |
-| (none)    | -    | -        | -       | -           |
-
-Result fields:
-
-- `deletedIds` (array)
-- `summary`
-- `nextActions`
-
 ## Data Model
 
 A todo item has the following shape:
@@ -254,6 +251,9 @@ A todo item has the following shape:
   "id": "string",
   "description": "string",
   "completed": false,
+  "priority": "low|medium|high?",
+  "tags": ["string"],
+  "dueAt": "ISO timestamp with offset?",
   "createdAt": "ISO timestamp with offset",
   "updatedAt": "ISO timestamp with offset?",
   "completedAt": "ISO timestamp with offset?"
@@ -263,6 +263,8 @@ A todo item has the following shape:
 Notes:
 
 - `createdAt`, `updatedAt`, and `completedAt` are ISO 8601 timestamps with offset (e.g., `2025-02-28T10:30:00Z`).
+- `dueAt` uses the same ISO 8601 timestamp format with an explicit offset.
+- When tools report an ambiguous match (error code `E_AMBIGUOUS`), prefer using an exact `id` from the provided candidates.
 
 ## Client Configuration
 

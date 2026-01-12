@@ -9,7 +9,6 @@ import {
   registerAddTodo,
   registerAddTodos,
   registerAllTools,
-  registerClearTodos,
   registerCompleteTodo,
   registerDeleteTodo,
   registerListTodos,
@@ -111,7 +110,6 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       'update_todo',
       'complete_todo',
       'delete_todo',
-      'clear_todos',
     ];
     names.forEach((name) => {
       assert.doesNotThrow(() => getHandler(name));
@@ -164,14 +162,6 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       (item) => item.description
     );
     assert.deepEqual(descriptions, ['Alpha task', 'Beta task']);
-  });
-
-  it('clear_todos rejects unknown fields', async () => {
-    const { server, getHandler } = createToolHarness();
-    registerClearTodos(server);
-
-    const deleteHandler = getHandler<unknown>('clear_todos');
-    await assert.rejects(() => deleteHandler({ unexpected: 1 }));
   });
 
   it('lists all todos when no filter specified', async () => {
@@ -337,32 +327,6 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     };
     assert.equal(alreadyItem.updatedAt, completeItem.updatedAt);
     assert.match(String(alreadyStructured.summary ?? ''), /already completed/i);
-  });
-
-  it('deletes all todos', async () => {
-    const { server, getHandler } = createToolHarness();
-    registerClearTodos(server);
-
-    await addTodos([
-      { description: 'Item one' },
-      { description: 'Item two' },
-      { description: 'Item three' },
-    ]);
-
-    const deleteHandler = getHandler<Record<string, never>>('clear_todos');
-    const result = await deleteHandler({});
-    const structured = getStructured(result)?.result as Record<string, unknown>;
-
-    assert.equal((structured.deletedIds as unknown[]).length, 3);
-    assert.match(String(structured.summary ?? ''), /deleted 3 todos/i);
-
-    const remaining = await getTodos();
-    assert.equal(remaining.length, 0);
-
-    const todoFile = process.env.TODOKIT_TODO_FILE;
-    assert.ok(todoFile);
-    const stored = await readFileIfExists(todoFile, 2_000);
-    assert.equal(stored, null);
   });
 
   it('delete_todo requires exact id', async () => {
