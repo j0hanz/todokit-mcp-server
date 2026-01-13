@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -130,6 +132,22 @@ const SERVER_VERSION =
     ? packageJson.version
     : '0.0.0';
 
+const DEFAULT_INSTRUCTIONS = 'Todokit to-do list manager';
+
+function loadServerInstructions(): string {
+  try {
+    const instructionsPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      'instructions.md'
+    );
+    const raw = readFileSync(instructionsPath, { encoding: 'utf8' });
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : DEFAULT_INSTRUCTIONS;
+  } catch {
+    return DEFAULT_INSTRUCTIONS;
+  }
+}
+
 let shuttingDown = false;
 let activeServer: McpServer | null = null;
 let disableDiagnostics: (() => void) | null = null;
@@ -188,7 +206,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     { name: 'todokit', version: SERVER_VERSION },
     {
-      instructions: 'Todokit to-do list manager',
+      instructions: loadServerInstructions(),
       capabilities: { logging: {} },
     }
   );

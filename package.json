@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/instructions.md','dist/instructions.md')\" && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
     "clean": "node -e \"require('fs').rmSync('dist', {recursive: true, force: true})\"",
     "prepare": "npm run build",
     "dev": "tsx watch src/index.ts",
