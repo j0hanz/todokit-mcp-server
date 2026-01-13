@@ -1,122 +1,105 @@
 # Todokit MCP Server — AI Usage Instructions
 
-Use this server to manage a small, persistent todo list (JSON file storage). Prefer using these tools over “remembering” tasks in chat.
+Use this server to manage a small, persistent todo list (JSON file storage). Prefer using these tools over "remembering" state in chat.
 
 ## Operating Rules
 
-- Use tools only when it changes or verifies the todo list (don’t call tools “just to check”).
+- Use tools only when it changes or verifies the todo list (don't call tools "just to check").
 - Prefer `list_todos` to establish state before updating/completing/deleting.
-- Operate by `id` (all mutation tools require an exact `id`). If the user doesn’t provide an id, list first and then ask which item to act on.
+- Operate by `id` (all mutation tools require an exact `id`). If the user doesn't provide an id, list first and then ask which item to act on.
 - Batch-create with `add_todos` when adding multiple items.
 - Treat `delete_todo` as destructive: ask for explicit confirmation unless the user clearly requested deletion.
-- Keep entries atomic and actionable. If a request is vague, ask a clarifying question before creating todos.
+- If request is vague, ask clarifying questions.
 
-### Quick Decision Rules
+### Strategies
 
-- If you are unsure what exists: call `list_todos` (default: pending) before any mutation.
-- If the user gives 2+ tasks: use `add_todos` (single call) instead of multiple `add_todo` calls.
-- If the user asks to “remove”/“delete” without naming a specific item: `list_todos` and ask which `id`.
-- Prefer `complete_todo` over `delete_todo` unless it’s a mistake/duplicate.
+- **Discovery:** Call `list_todos` (default: pending) to see current tasks. Use `status='all'` only if looking for completed items.
+- **Action:** Chain tools efficiently: `list` → confirm ID → `update`/`complete`. Use `add_todos` for multiple items.
 
-### Client UX Notes (VS Code)
+## Data Model
 
-- VS Code typically prompts for confirmation before running tools that are not marked read-only.
-- VS Code may cache tool lists; users can clear the cache via **MCP: Reset Cached Tools**.
-- Models have a limit on how many tools can be enabled at once (VS Code mentions a 128-tool limit per request). If tool selection gets noisy, narrow to the minimum tools needed.
-- Only run MCP servers from trusted sources; VS Code prompts users to trust servers when they’re first started.
+- **Todo:** `id` (string), `description` (1-2000 chars), `priority` (low|medium|high), `category` (work|bug|testing|docs), `completed` (boolean), `dueAt` (optional ISO 8601 offset).
 
-## Data Model (What a Todo Looks Like)
+## Workflows
 
-Each todo has:
+### 1) Daily Triage
 
-- `id` (string)
-- `description` (string, 1–2000 chars)
-- `completed` (boolean)
-- `priority`: `low` | `medium` | `high`
-- `category`: `work` | `bug` | `testing` | `docs`
-- `dueAt` (optional): ISO 8601 timestamp with an explicit offset (RFC 3339), e.g. `2026-01-13T17:00:00Z` or `2026-01-13T17:00:00+02:00`
+```text
+list_todos(status='pending') → See what is open
+add_todos(...) → Add new items in bulk
+complete_todo(id=...) → Mark finished items
+```
 
-## Workflows (Recommended)
-
-### 1) Capture tasks from the user
-
-1. If the user gives multiple tasks, normalize into a short list.
-2. Call `add_todos` once.
-3. Return a brief summary and (optionally) suggest `list_todos` if they want to review.
-
-### 2) Review what’s pending
-
-1. Call `list_todos` with default status (pending).
-2. If the list is truncated, narrow the request (use `status: "pending"`/`"completed"`) and/or ask which `id` to operate on.
-
-### 3) Edit a todo
-
-1. `list_todos` (unless user provided an `id`).
-2. Confirm the target `id`.
-3. Call `update_todo` with only the fields that change.
-
-### 4) Complete work
-
-1. `list_todos` (pending)
-2. Call `complete_todo` with the chosen `id`.
-3. Optionally re-list pending to show progress.
-
-### 5) Cleanup
-
-- Prefer completing items over deleting them.
-- Only use `delete_todo` for mistaken/invalid entries.
-- Note: when all todos are completed, the storage file is automatically deleted.
-
-## Tools (What to Use, When)
+## Tools
 
 ### add_todo
 
-Create exactly one todo.
+Create a new task.
 
-- Use when: user provides a single, clear task.
-- Args: `description`, `priority`, `category`, optional `dueAt`.
+- **Use when:** User provides a single, clear task.
+- **Args:** `description` (req), `priority` (req), `category` (req), `dueAt` (opt).
+- **Returns:** `{ item, summary, nextActions }`
 
 ### add_todos
 
-Create multiple todos in one call.
+Create multiple tasks in one call.
 
-- Use when: user provides 2+ tasks or a list.
-- Args: `items` (1–50), each with `description`, `priority`, `category`, optional `dueAt`.
+- **Use when:** User provides 2+ tasks or a list.
+- **Args:** `items` (array, 1-50 items).
+- **Returns:** `{ items, summary, nextActions }`
 
 ### list_todos
 
 List todos with an optional status filter.
 
-- Use when: you need current state or need an `id` before acting.
-- Args: optional `status` = `pending` (default) | `completed` | `all`.
-- Notes: results can be truncated (returns up to 50 items). If truncated, narrow the filter or operate by `id`.
+- **Use when:** Checking potential duplicates, finding IDs, or reviewing workload.
+- **Args:** `status` (pending|completed|all, default: pending).
+- **Returns:** `{ items, summary, counts, truncated, hint }`
 
 ### update_todo
 
-Update fields on a todo.
+Update fields on a todo item.
 
-- Use when: user wants to rename/reprioritize/recategorize/reschedule.
-- Args: `id` plus any of `description`, `priority`, `category`, `dueAt`.
-- Notes: calling with no updatable fields returns an error.
+- **Use when:** Renaming, rescheduling, or changing priority/category.
+- **Args:** `id` (req), `description`, `priority`, `category`, `dueAt`.
+- **Returns:** `{ item, summary, nextActions }`
 
 ### complete_todo
 
 Mark a todo as completed.
 
-- Use when: user confirms a task is done.
-- Args: `id`.
-- Notes: idempotent; completing an already-completed todo returns a “already completed” summary.
+- **Use when:** Task is done.
+- **Args:** `id` (req).
+- **Returns:** `{ item, summary, nextActions }`
 
 ### delete_todo
 
-Delete a todo by id.
+Delete a todo item by ID.
 
-- Use when: user explicitly wants removal (mistake/duplicate) and confirms.
-- Args: `id`.
+- **Use when:** Removing mistakes or duplicates (prefer completion for finished work).
+- **Args:** `id` (req).
+- **Returns:** `{ deletedIds, summary, nextActions }`
 
 ## Response Shape
 
-All tools return JSON in both `structuredContent` and a JSON-stringified `content` text block.
+Success: `{ "ok": true, "result": { ... } }`
+Error: `{ "ok": false, "error": { "code": "...", "message": "..." } }`
 
-- Success: `{ "ok": true, "result": { ... } }`
-- Error: `{ "ok": false, "error": { "code": "E_CODE", "message": "..." } }`
+### Common Errors
+
+| Code                  | Meaning                   | Resolution                                |
+| --------------------- | ------------------------- | ----------------------------------------- |
+| `E_NOT_FOUND`         | Todo ID does not exist    | List todos to find correct ID             |
+| `E_INVALID_PARAMS`    | Schema validation failed  | Check enums (priority/category) and types |
+| `E_STORAGE_CONFLICT`  | File changed during write | Retry the operation                       |
+| `E_STORAGE_TOO_LARGE` | File exceeds 5MB          | Clean up old todos                        |
+
+## Limits
+
+- **Pagination:** `list_todos` returns max 50 items.
+- **Batch Size:** `add_todos` accepts max 50 items.
+- **Storage:** File is automatically deleted when all tasks are completed.
+
+## Security
+
+- This server writes to a local JSON file (`todos.json` by default). Do not store sensitive credentials or PII in todo descriptions.
