@@ -11,6 +11,20 @@ Use this server to manage a small, persistent todo list (JSON file storage). Pre
 - Treat `delete_todo` as destructive: ask for explicit confirmation unless the user clearly requested deletion.
 - Keep entries atomic and actionable. If a request is vague, ask a clarifying question before creating todos.
 
+### Quick Decision Rules
+
+- If you are unsure what exists: call `list_todos` (default: pending) before any mutation.
+- If the user gives 2+ tasks: use `add_todos` (single call) instead of multiple `add_todo` calls.
+- If the user asks to “remove”/“delete” without naming a specific item: `list_todos` and ask which `id`.
+- Prefer `complete_todo` over `delete_todo` unless it’s a mistake/duplicate.
+
+### Client UX Notes (VS Code)
+
+- VS Code typically prompts for confirmation before running tools that are not marked read-only.
+- VS Code may cache tool lists; users can clear the cache via **MCP: Reset Cached Tools**.
+- Models have a limit on how many tools can be enabled at once (VS Code mentions a 128-tool limit per request). If tool selection gets noisy, narrow to the minimum tools needed.
+- Only run MCP servers from trusted sources; VS Code prompts users to trust servers when they’re first started.
+
 ## Data Model (What a Todo Looks Like)
 
 Each todo has:
