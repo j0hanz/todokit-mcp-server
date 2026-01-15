@@ -50,6 +50,88 @@ import {
   updateTodoById,
 } from './storage.js';
 
+const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const TOOL_ABORT_ERROR_NAME = 'TodokitToolAbort';
+const TOOL_TIMEOUT_ERROR_NAME = 'TodokitToolTimeout';
+
+let isInitialized = (): boolean => true;
+
+export function setInitializationGuard(fn: () => boolean): void {
+  isInitialized = fn;
+}
+
+function getToolTimeoutMs(): number | null {
+  const raw = process.env.TODOKIT_TOOL_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_TOOL_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    return DEFAULT_TOOL_TIMEOUT_MS;
+  }
+  if (value <= 0) return null;
+  return value;
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+function createAbortPromise(
+  signal: AbortSignal | undefined
+): { promise: Promise<never>; cancel: () => void } | null {
+  if (!signal) return null;
+  if (signal.aborted) {
+    const error = new Error('Tool cancelled');
+    error.name = TOOL_ABORT_ERROR_NAME;
+    return { promise: Promise.reject(error), cancel: () => undefined };
+  }
+  let listener: (() => void) | null = null;
+  const promise = new Promise<never>((_, reject) => {
+    listener = () => {
+      const error = new Error('Tool cancelled');
+      error.name = TOOL_ABORT_ERROR_NAME;
+      reject(error);
+    };
+    signal.addEventListener('abort', listener, { once: true });
+  });
+  return {
+    promise,
+    cancel: () => {
+      if (listener) {
+        signal.removeEventListener('abort', listener);
+      }
+    },
+  };
+}
+
+function createTimeoutPromise(
+  ms: number,
+  message: string
+): { promise: Promise<never>; cancel: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.name = TOOL_TIMEOUT_ERROR_NAME;
+      reject(error);
+    }, ms);
+  });
+  return {
+    promise,
+    cancel: () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    },
+  };
+}
+
+function classifyInterruption(error: unknown): 'cancelled' | 'timeout' | null {
+  if (!(error instanceof Error)) return null;
+  if (error.name === TOOL_ABORT_ERROR_NAME) return 'cancelled';
+  if (error.name === TOOL_TIMEOUT_ERROR_NAME) return 'timeout';
+  return null;
+}
+
 function mapExecutionError(
   error: unknown,
   fallbackCode: string
@@ -139,6 +221,19 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     const requestId = randomUUID();
     publishToolCallWithId(tool, input, requestId);
     const start = nowMs();
+    if (!isInitialized()) {
+      const response = createErrorResponse(
+        'E_NOT_INITIALIZED',
+        'Server not initialized'
+      );
+      publishSuccessResult(tool, requestId, start, response);
+      return Promise.resolve(response);
+    }
+    if (extra.signal.aborted) {
+      const response = createErrorResponse('E_CANCELLED', 'Tool cancelled');
+      publishSuccessResult(tool, requestId, start, response);
+      return Promise.resolve(response);
+    }
     let result: CallToolResult | Promise<CallToolResult>;
     try {
       result = runWithRequestContext({ requestId, tool }, () =>
@@ -151,12 +246,37 @@ function createWrappedHandler<InputArgs extends AnySchema>(
       return Promise.reject(rejection);
     }
 
-    return Promise.resolve(result)
+    const timeoutMs = getToolTimeoutMs();
+    const timeout = timeoutMs
+      ? createTimeoutPromise(timeoutMs, `Tool ${tool} timed out`)
+      : null;
+    const abort = createAbortPromise(extra.signal);
+    const race = Promise.race(
+      [Promise.resolve(result), timeout?.promise, abort?.promise].filter(
+        isDefined
+      )
+    );
+
+    return race
+      .finally(() => {
+        timeout?.cancel();
+        abort?.cancel();
+      })
       .then((resolved) => {
         publishSuccessResult(tool, requestId, start, resolved);
         return resolved;
       })
       .catch((error: unknown) => {
+        const interruption = classifyInterruption(error);
+        if (interruption) {
+          const code = interruption === 'timeout' ? 'E_TIMEOUT' : 'E_CANCELLED';
+          const response = createErrorResponse(
+            code,
+            error instanceof Error ? error.message : String(error)
+          );
+          publishSuccessResult(tool, requestId, start, response);
+          return response;
+        }
         publishFailureResult(tool, requestId, start);
         throw error;
       });

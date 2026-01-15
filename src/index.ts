@@ -14,7 +14,7 @@ import {
   publishLifecycleEvent,
 } from './diagnostics.js';
 import { closeDb } from './storage.js';
-import { registerAllTools } from './tools.js';
+import { registerAllTools, setInitializationGuard } from './tools.js';
 
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
@@ -211,6 +211,14 @@ export function createServer(): McpServer {
     }
   );
 
+  let initialized = false;
+  const previousInitialized = server.server.oninitialized;
+  server.server.oninitialized = () => {
+    initialized = true;
+    previousInitialized?.();
+  };
+  setInitializationGuard(() => initialized);
+
   patchToolErrorResponses(server);
   registerAllTools(server);
   return server;
@@ -296,6 +304,11 @@ if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
     disableDiagnostics = enableDefaultDiagnosticsSubscribers({
       logger: (line: string): void => {
         logger.info(line);
+        if (activeServer?.isConnected()) {
+          void activeServer
+            .sendLoggingMessage({ level: 'info', data: { message: line } })
+            .catch(() => undefined);
+        }
       },
     });
   }
