@@ -278,7 +278,9 @@ function createWrappedHandler<InputArgs extends AnySchema>(
           return response;
         }
         publishFailureResult(tool, requestId, start);
-        throw error;
+
+        const mapped = mapExecutionError(error, 'E_TOOL_ERROR');
+        return createErrorResponse(mapped.code, mapped.message);
       });
   };
   return wrapped as ToolCallback<InputArgs>;
@@ -328,7 +330,8 @@ function buildAddTodosResponse(todos: Todo[]): CallToolResult {
   return createToolResponse({
     ok: true,
     result: {
-      items: todos,
+      count: todos.length,
+      ids: todos.map((t) => t.id),
       summary: `Added ${String(todos.length)} todos`,
       nextActions: [...ADD_TODOS_ACTIONS],
     },

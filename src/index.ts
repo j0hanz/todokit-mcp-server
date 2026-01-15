@@ -280,10 +280,10 @@ export async function closeServerSafely(
 
   try {
     await server.close();
-    process.exitCode = 0;
+    process.exit(0);
   } catch (error: unknown) {
     console.error(`Shutdown error (${signal}):`, error);
-    process.exitCode = 1;
+    process.exit(1);
   }
 }
 
