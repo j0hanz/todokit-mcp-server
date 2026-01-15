@@ -4,7 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  McpServer,
+  ResourceTemplate,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -134,18 +137,38 @@ const SERVER_VERSION =
 
 const DEFAULT_INSTRUCTIONS = 'Todokit to-do list manager';
 
+function resolveInstructionsPath(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), 'instructions.md');
+}
+
 function loadServerInstructions(): string {
   try {
-    const instructionsPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      'instructions.md'
-    );
-    const raw = readFileSync(instructionsPath, { encoding: 'utf8' });
+    const raw = readFileSync(resolveInstructionsPath(), { encoding: 'utf8' });
     const trimmed = raw.trim();
     return trimmed.length > 0 ? trimmed : DEFAULT_INSTRUCTIONS;
   } catch {
     return DEFAULT_INSTRUCTIONS;
   }
+}
+
+function registerInstructionsResource(server: McpServer): void {
+  server.registerResource(
+    'internal://instructions',
+    new ResourceTemplate('internal://instructions', { list: undefined }),
+    { title: 'Todokit Instructions', mimeType: 'text/markdown' },
+    (uri) => {
+      const text = loadServerInstructions();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text,
+            mimeType: 'text/markdown',
+          },
+        ],
+      };
+    }
+  );
 }
 
 let shuttingDown = false;
@@ -210,6 +233,8 @@ export function createServer(): McpServer {
       capabilities: { logging: {} },
     }
   );
+
+  registerInstructionsResource(server);
 
   let initialized = false;
   const previousInitialized = server.server.oninitialized;
