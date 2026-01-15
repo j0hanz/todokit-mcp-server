@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { parse } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -140,6 +141,26 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
         process.env.TODOKIT_MAX_TODO_FILE_BYTES = previous;
       }
     }
+  });
+
+  it('rejects cross-drive todo paths when outside cwd is disallowed', async () => {
+    if (process.platform !== 'win32') return;
+    const root = parse(process.cwd()).root;
+    const match = root.match(/^([A-Za-z]):\\$/);
+    if (!match) return;
+
+    const currentDrive = match[1]?.toUpperCase();
+    const otherDrive = currentDrive === 'C' ? 'D' : 'C';
+
+    delete process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
+    process.env.TODOKIT_TODO_FILE = `${otherDrive}:\\todokit-test\\todos.json`;
+
+    await assert.rejects(
+      () => getTodos(),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes('within the current working directory')
+    );
   });
 
   it('fails fast when a write lock is held', async () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
@@ -244,10 +244,15 @@ interface TodoCache {
 let cache: TodoCache | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
+function isPathInside(baseDir: string, targetPath: string): boolean {
+  const rel = relative(baseDir, targetPath);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
 function validatePathSafety(filePath: string): void {
-  const cwd = process.cwd();
-  const rel = relative(cwd, filePath);
-  if (rel.startsWith('..') && !process.env.TODOKIT_ALLOW_OUTSIDE_CWD) {
+  const cwd = resolve(process.cwd());
+  const target = resolve(filePath);
+  if (!isPathInside(cwd, target) && !process.env.TODOKIT_ALLOW_OUTSIDE_CWD) {
     throw new Error('Todo file must be within the current working directory');
   }
 }

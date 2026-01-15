@@ -9,7 +9,15 @@ import {
   ResourceTemplate,
 } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  type CallToolResult,
+  ErrorCode,
+  type InitializeRequest,
+  InitializeRequestSchema,
+  type InitializeResult,
+  McpError,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 import {
@@ -151,12 +159,18 @@ function loadServerInstructions(): string {
   }
 }
 
-function registerInstructionsResource(server: McpServer): void {
+function registerInstructionsResource(
+  server: McpServer,
+  isInitialized: () => boolean
+): void {
   server.registerResource(
     'internal://instructions',
     new ResourceTemplate('internal://instructions', { list: undefined }),
     { title: 'Todokit Instructions', mimeType: 'text/markdown' },
     (uri) => {
+      if (!isInitialized()) {
+        throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
+      }
       const text = loadServerInstructions();
       return {
         contents: [
@@ -167,6 +181,39 @@ function registerInstructionsResource(server: McpServer): void {
           },
         ],
       };
+    }
+  );
+}
+
+function installStrictInitializeHandler(server: McpServer): void {
+  type InitializeHandler = (
+    request: InitializeRequest
+  ) => Promise<InitializeResult>;
+
+  const internal = server.server as unknown as {
+    _oninitialize?: InitializeHandler;
+  };
+  const defaultHandler =
+    typeof internal._oninitialize === 'function'
+      ? internal._oninitialize.bind(server.server)
+      : null;
+
+  if (!defaultHandler) return;
+
+  server.server.setRequestHandler(
+    InitializeRequestSchema,
+    async (request: InitializeRequest) => {
+      const requestedVersion = request.params.protocolVersion;
+      if (!SUPPORTED_PROTOCOL_VERSIONS.includes(requestedVersion)) {
+        setTimeout(() => {
+          void server.close().catch(() => undefined);
+        }, 0);
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Unsupported protocol version: ${requestedVersion}`
+        );
+      }
+      return await defaultHandler(request);
     }
   );
 }
@@ -226,6 +273,9 @@ function patchToolErrorResponses(server: McpServer): void {
 }
 
 export function createServer(): McpServer {
+  let initialized = false;
+  const isInitialized = (): boolean => initialized;
+
   const server = new McpServer(
     { name: 'todokit', version: SERVER_VERSION },
     {
@@ -237,13 +287,18 @@ export function createServer(): McpServer {
     }
   );
 
-  registerInstructionsResource(server);
+  installStrictInitializeHandler(server);
+  registerInstructionsResource(server, isInitialized);
 
-  let initialized = false;
   const previousInitialized = server.server.oninitialized;
   server.server.oninitialized = () => {
     initialized = true;
     previousInitialized?.();
+  };
+  const previousClosed = server.server.onclose;
+  server.server.onclose = () => {
+    previousClosed?.();
+    void shutdown('SIGTERM');
   };
   setInitializationGuard(() => initialized);
 
