@@ -232,9 +232,8 @@ function getMaxTodoFileBytes(): number {
 
 function getJsonIndentation(): number {
   const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
-  if (!raw) return 2;
-  if (raw === '0' || raw === 'false') return 0;
-  return 2;
+  if (raw === 'true' || raw === '1' || raw === 'yes') return 2;
+  return 0;
 }
 
 interface TodoCache {
@@ -631,10 +630,7 @@ function calculateUpdatedTodo(current: Todo, updates: TodoUpdate): Todo {
     updatedAt: new Date().toISOString(),
   };
 
-  if (
-    updates.completed !== undefined &&
-    updates.completed !== current.completed
-  ) {
+  if ('completed' in updates && updates.completed !== current.completed) {
     updatedTodo.completedAt = updates.completed
       ? new Date().toISOString()
       : undefined;
