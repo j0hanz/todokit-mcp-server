@@ -25,9 +25,15 @@
 
 ## 3. Tool Nuances & "Gotchas"
 
-- **`list_todos`**: Defaults to `status='pending'` and returns max 50 items; use `status='all'` to include completed items.
-- **`add_todos`**: Prefer for 2+ items to reduce calls.
-- **`update_todo`**: Requires at least one field; otherwise returns `E_BAD_REQUEST`.
+- **`list_todos`**:
+  - Defaults to `status='pending'` and returns max 50 items.
+  - Use `status='all'` to include completed items.
+- **`add_todos`**:
+  - Prefer for 2+ items to reduce calls (max 50 items/batch).
+  - Enums: `priority` (low, medium, high), `category` (work, bug, testing, docs).
+- **`update_todo`**:
+  - Requires at least one field; otherwise returns `E_BAD_REQUEST`.
+  - Dates (`dueAt`) must be ISO-8601 with offset (e.g., `2024-01-01T12:00:00Z`).
 - **`delete_todo`**: Destructive and non-idempotent—confirm intent first.
 - **Storage behavior**: The JSON file is auto-deleted when all todos are completed.
 
