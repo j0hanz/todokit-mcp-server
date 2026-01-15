@@ -10,11 +10,13 @@ let tempDir = '';
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'todokit-test-'));
   process.env.TODOKIT_TODO_FILE = join(tempDir, 'todos.json');
+  process.env.TODOKIT_ALLOW_OUTSIDE_CWD = 'true';
 });
 
 afterEach(async () => {
   await closeDb();
   delete process.env.TODOKIT_TODO_FILE;
+  delete process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
   if (tempDir) {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -230,7 +230,10 @@ export function createServer(): McpServer {
     { name: 'todokit', version: SERVER_VERSION },
     {
       instructions: loadServerInstructions(),
-      capabilities: { logging: {} },
+      capabilities: {
+        logging: {},
+        resources: {},
+      },
     }
   );
 
