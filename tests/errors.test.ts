@@ -16,6 +16,6 @@ describe('errors', () => {
     assert.equal(result.isError, true);
     assert.equal(result.structuredContent.ok, false);
     assert.equal(result.structuredContent.error.code, 'E_TEST');
-    assert.equal(result.structuredContent.result?.hint, 'Fix');
+    assert.equal((result.structuredContent.result as any)?.hint, 'Fix');
   });
 });

@@ -52,7 +52,7 @@ describe('runtime helpers', () => {
         close: async () => {
           throw new Error('fail');
         },
-      } as McpServer;
+      } as unknown as McpServer;
       const originalError = console.error;
       console.error = () => undefined;
       try {

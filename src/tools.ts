@@ -412,18 +412,6 @@ interface CountSummary {
   pending: number;
 }
 
-function computeCounts(todos: readonly Todo[]): CountSummary {
-  let completed = 0;
-  for (const todo of todos) {
-    if (todo.completed) completed += 1;
-  }
-  return {
-    total: todos.length,
-    completed,
-    pending: todos.length - completed,
-  };
-}
-
 function buildSummary(counts: CountSummary): string {
   if (counts.total === 0) {
     return 'No todos found';
@@ -484,23 +472,50 @@ async function handleListTodos(
   filters: ListTodosFilters
 ): Promise<CallToolResult> {
   const allTodos = await getTodos();
-  const counts = computeCounts(allTodos);
-
   const status = resolveStatus(filters.status);
-  let filtered: readonly Todo[];
-  if (status === 'pending') {
-    filtered = allTodos.filter((todo) => !todo.completed);
-  } else if (status === 'completed') {
-    filtered = allTodos.filter((todo) => todo.completed);
-  } else {
-    filtered = allTodos;
-  }
-  const filteredCounts = computeCounts(filtered);
 
   const limit = 50;
-  const items = filtered.slice(0, limit);
-  const truncated = filtered.length > items.length;
-  const remaining = Math.max(0, filtered.length - items.length);
+  const items: Todo[] = [];
+
+  let total = 0;
+  let completed = 0;
+  let filteredTotal = 0;
+  let filteredCompleted = 0;
+
+  const shouldInclude = (todo: Todo): boolean => {
+    if (status === 'all') return true;
+    if (status === 'completed') return todo.completed;
+    return !todo.completed;
+  };
+
+  for (const todo of allTodos) {
+    total += 1;
+    if (todo.completed) completed += 1;
+
+    if (shouldInclude(todo)) {
+      filteredTotal += 1;
+      if (todo.completed) filteredCompleted += 1;
+
+      if (items.length < limit) {
+        items.push(todo);
+      }
+    }
+  }
+
+  const counts: CountSummary = {
+    total,
+    completed,
+    pending: total - completed,
+  };
+
+  const filteredCounts: CountSummary = {
+    total: filteredTotal,
+    completed: filteredCompleted,
+    pending: filteredTotal - filteredCompleted,
+  };
+
+  const truncated = filteredCounts.total > items.length;
+  const remaining = Math.max(0, filteredCounts.total - items.length);
 
   let summary: string;
   if (filteredCounts.total === 0) {
