@@ -1,70 +1,65 @@
 # AGENTS.md
 
-> **Purpose:** Context and strict guidelines for AI agents working in this repository.
+> Purpose: High-signal context and strict guidelines for AI agents working in this repository.
 
-## 1. Project Context
+## 1) Project Context
 
-- **Domain:** MCP (Model Context Protocol) stdio server that manages a todo list with JSON-file persistence.
-- **Tech Stack:**
-  - **Language:** TypeScript (repo uses `typescript@5.9.3`)
-  - **Runtime:** Node.js `>=20.0.0` (also used in CI)
-  - **Framework/Protocol:** `@modelcontextprotocol/sdk` (stdio transport)
-  - **Key Libraries:** `@modelcontextprotocol/sdk`, `zod`, `tsx` (dev/test runner support)
-- **Architecture:** Single-package, layered modules: entrypoint (`src/index.ts`) → tool registration (`src/tools.ts`) → persistence (`src/storage.ts`) + shared schemas/responses/diagnostics.
+- **Domain:** Model Context Protocol (MCP) server for Todokit task management.
+- **Tech Stack (Verified):**
+  - **Languages:** TypeScript 5.9.x, Node.js >= 20.0.0 (`package.json`).
+  - **Frameworks:** `@modelcontextprotocol/sdk` (`package.json`).
+  - **Key Libraries:** `zod` (validation), `tsx` (execution), `eslint`/`prettier` (style).
+- **Architecture:** Modularized MCP server (Handlers in `tools.ts`, Logic in `storage.ts`, Types in `schema.ts`).
 
-## 2. Repository Map (High-Level Only)
+## 2) Repository Map (High-Level)
 
-- `src/`: MCP server implementation (tool registration, schemas, storage, diagnostics)
-- `tests/`: Node.js built-in test runner (`node:test`) tests
-- `.github/workflows/`: CI/release automation (publish workflow)
-- `docs/`: documentation assets (e.g., logo)
+- `src/`: Source code (Typescript).
+- `tests/`: Test files (`*.test.ts`).
+- `.github/`: CI/CD workflows and prompt context.
+  > Ignore `dist/`, `node_modules/`, `coverage/`.
 
-> Note: Ignore `dist/` and `node_modules/`.
+## 3) Operational Commands (Verified)
 
-## 3. Operational Commands
+- **Environment:** Node.js >= 20.
+- **Install:** `npm ci`
+- **Dev:** `npm run dev` (Runs `tsx watch src/index.ts`)
+- **Test:** `npm run test` (Runs `node --test tests/*.test.ts`)
+- **Build:** `npm run build` (Clean + tsc + copy assets)
+- **Lint/Format:** `npm run lint` / `npm run format`
 
-- **Environment:** Node.js 20+ (ESM / NodeNext module resolution)
-- **Install (CI-style):** `npm ci`
-- **Dev (watch):** `npm run dev`
-- **Test:** `npm run test`
-- **Build:** `npm run build`
+## 4) Coding Standards (Style & Patterns)
 
-CI/release also runs: `npm run lint`, `npm run type-check`, `npm run test:coverage`, `npm run dup-check`.
+- **Naming:**
+  - **Types/Schemas:** PascalCase (e.g., `AddTodoSchema`, `Todo`).
+  - **Functions/Vars:** camelCase (e.g., `handleAddTodo`).
+  - **Constants:** SCREAMING_SNAKE_CASE (e.g., `DEFAULT_TOOL_TIMEOUT_MS`).
+- **Structure:**
+  - Tool definitions and handlers live in `src/tools.ts`.
+  - Data models and Zod schemas live in `src/schema.ts`.
+  - Persistence logic lives in `src/storage.ts`.
+- **Typing/Strictness:** strict mode enabled (`"strict": true`, `"noUncheckedIndexedAccess": true`).
+- **Patterns Observed:**
+  - **Tool Registration:** Use `registerToolWithDiagnostics` wrapper for error handling/tracing.
+  - **Response Helpers:** Use `createToolResponse` / `createErrorResponse` (from `src/responses.ts`).
+  - **Validation:** Extensive use of `zod` for input/output validation.
 
-## 4. Coding Standards (Style & Patterns)
+## 5) Agent Behavioral Rules (Do Nots)
 
-- **Module System:** ESM + TypeScript `module: NodeNext`.
-  - Local imports use `.js` extensions (even in `.ts` source).
-- **Typing:** Strict TypeScript (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, etc.).
-- **Validation:** Zod schemas are `z.strictObject(...)` and reject unknown fields.
-- **Tool Responses:** Tools return both `structuredContent` and a JSON string in `content` (compatibility requirement).
-- **Preferred Patterns:**
-  - Centralized helpers for results/errors (`src/responses.ts`).
-  - Tool handlers map execution errors to coded error responses (no throwing for expected failures).
-  - Storage uses queued writes + atomic writes + lock file (`.lock`) to reduce corruption and races.
+- Do not introduce new dependencies without explicit instruction (use `npm install`).
+- Do not modify `package-lock.json` manually.
+- Do not bypass Zod schema definitions; ensure all inputs/outputs match strict schemas.
+- Do not remove `npm run type-check` or `npm run lint` steps from the workflow.
+- Do not use `console.log` for production logging; use the diagnostics/logging utilities.
 
-## 5. Agent Behavioral Rules (The “Do Nots”)
+## 6) Testing Strategy (Verified)
 
-- **Prohibited:** Do not write non-MCP output to **stdout** from the server; log to **stderr**.
-- **Prohibited:** Do not remove `.js` extensions from local imports (NodeNext/ESM).
-- **Prohibited:** Do not add `default` exports; keep named exports.
-- **Prohibited:** Do not use `any` (lint forbids it).
-- **Prohibited:** Do not edit `package-lock.json` manually.
-- **Handling Secrets:** Never hardcode tokens/credentials; prefer environment variables.
-- **Storage Safety:** Treat `delete_todo` as destructive; avoid deleting unless explicitly requested.
+- **Framework:** Node.js native test runner (`node:test`) with `tsx`.
+- **Where tests live:** `tests/*.test.ts`.
+- **Approach:**
+  - Tests run directly against TypeScript source using `tsx` loader.
+  - Coverage available via `npm run test:coverage`.
 
-## 6. Testing Strategy
+## 7) Evolution Rules
 
-- **Framework:** Node.js built-in test runner (`node:test`) with `tsx` ESM loader.
-- **Approach:** Tests isolate storage via temp dirs and `TODOKIT_TODO_FILE` (see `tests/setup.ts`). Tool tests use an in-memory MCP server harness (no real stdio).
-
-## 7. Evolution & Maintenance
-
-- **Update Rule:** If conventions change (scripts, tool names, response shapes), propose an update to this file in the same PR.
-- **Feedback Loop:** If a build/test command fails twice, record the fix in a short “Common Pitfalls” note here.
-
-### Common Pitfalls (Add as discovered)
-
-- NodeNext ESM requires `.js` extensions in local imports.
-- MCP transport uses stdio: keep stdout clean; emit logs/diagnostics to stderr.
-- Storage auto-deletes the todo JSON file when all todos are completed.
+- If conventions change, include an `AGENTS.md` update in the same PR.
+- If a command is corrected after failures, record the final verified command here.
