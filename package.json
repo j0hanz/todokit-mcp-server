@@ -18,10 +18,10 @@
     "README.md"
   ],
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true}); ['tsconfig.tsbuildinfo', 'tsconfig.build.tsbuildinfo', 'tsconfig.test.tsbuildinfo'].forEach(f => require('fs').rmSync(f, {force:true}))\"",
-    "validate:instructions": "node -e \"require('fs').accessSync('src/instructions.md')\"",
-    "build": "npm run clean && tsc -p tsconfig.json && npm run validate:instructions && npm run copy:assets && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
-    "copy:assets": "node -e \"require('fs').copyFileSync('src/instructions.md', 'dist/instructions.md')\"",
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', {recursive:true, force:true}); ['tsconfig.tsbuildinfo', 'tsconfig.build.tsbuildinfo', 'tsconfig.test.tsbuildinfo'].forEach(f => rmSync(f, {force:true}))\"",
+    "validate:instructions": "node --input-type=module -e \"import { accessSync } from 'node:fs'; accessSync('src/instructions.md')\"",
+    "build": "npm run clean && tsc -p tsconfig.json && npm run validate:instructions && npm run copy:assets && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('dist/index.js', '755')\"",
+    "copy:assets": "node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('src/instructions.md', 'dist/instructions.md')\"",
     "prepare": "npm run build",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
