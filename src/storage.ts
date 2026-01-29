@@ -554,7 +554,7 @@ export async function closeDb(): Promise<void> {
   });
 }
 
-export type MatchOutcome =
+type MatchOutcome =
   | { kind: 'match'; todo: Todo }
   | { kind: 'error'; response: ErrorResponse };
 
@@ -680,7 +680,7 @@ function buildUpdateOutcome(
   };
 }
 
-export type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
+type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
 
 export async function updateTodoById(
   id: string,

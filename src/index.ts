@@ -27,9 +27,9 @@ import {
 import { closeDb } from './storage.js';
 import { registerAllTools, setInitializationGuard } from './tools.js';
 
-export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
-export interface Logger {
+interface Logger {
   debug(message: string): void;
   info(message: string): void;
   warn(message: string): void;
@@ -98,10 +98,6 @@ function isLogLevel(value: unknown): value is LogLevel {
   );
 }
 
-function createDefaults(): CliOptions {
-  return { ...DEFAULT_CLI_OPTIONS };
-}
-
 function resolveTodoFile(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -134,7 +130,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
       logLevel,
     };
   } catch {
-    return createDefaults();
+    return { ...DEFAULT_CLI_OPTIONS };
   }
 }
 
