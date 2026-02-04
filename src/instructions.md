@@ -1,47 +1,58 @@
-# Todokit Instructions (src/instructions.md)
+# Todokit Instructions
 
 > Guidance for the Agent: These instructions are available as a resource (`internal://instructions`) or prompt (`get-help`). Load them when you are unsure about tool usage.
 
 ## 1. Core Capability
 
-- **Domain:** Manage a persistent local todo list stored in JSON.
-- **Primary Resources:** `Todo` items, list `counts`, `summary`, and `hint` metadata.
+- **Domain:** Local persistent todo list manager storing tasks in a JSON file.
+- **Primary Resources:** `Todo` items, list `counts`, metadata (`summary`, `hint`).
 
 ## 2. The "Golden Path" Workflows (Critical)
 
+_Describe the standard order of operations using ONLY tools that exist._
+
 ### Workflow A: Daily Triage
 
-1. Call `list_todos` (default `status='pending'`).
-2. Call `add_todo` (single) or `add_todos` (batch) to capture new tasks.
-3. Call `update_todo` or `complete_todo` to keep the list current.
-
-> Constraint: Never guess IDs. Always list first.
+1. Call `list_todos` (default `status='pending'`) to see active tasks.
+2. Call `add_todo` (single) or `add_todos` (batch) to capture new work.
+3. Call `update_todo` or `complete_todo` to manage progress.
+   > Constraint: Never guess IDs. Always list first.
 
 ### Workflow B: Cleanup & Verification
 
 1. Call `list_todos` with `status='completed'` to review finished items.
-2. Call `delete_todo` only when the user explicitly wants removal.
+2. Call `delete_todo` to remove items permanently.
 3. Call `list_todos` again to confirm remaining items.
 
-## 3. Tools (Read vs Write)
+## 3. Tool Nuances & Gotchas
 
-- **Read:** `list_todos`
-- **Write:** `add_todo`, `add_todos`, `update_todo`, `complete_todo`, `delete_todo`
+_Do NOT repeat JSON schema. Focus on behavior and pitfalls._
 
-## 4. Tool Nuances & Gotchas
+- **`list_todos`**
+  - **Purpose:** List todos with optional status filtering.
+  - **Inputs:** `status` ('pending'|'completed'|'all', default 'pending').
+  - **Limits:** Returns max 50 items; pagination not supported (use status filter).
 
-- **`list_todos`**: Defaults to `status='pending'` and returns max 50 items; use `status='all'` to include completed items.
-- **`add_todos`**: Prefer for 2+ items (max 50 items/batch). Enums: `priority` (low, medium, high), `category` (work, bug, testing, docs).
-- **`update_todo`**: Requires at least one updatable field; otherwise returns `E_BAD_REQUEST`.
-- **`complete_todo`**: Idempotent if already completed.
-- **`delete_todo`**: Destructive and non-idempotent—confirm intent first.
-- **`dueAt`**: ISO-8601 with offset (e.g., `2024-01-01T12:00:00Z`).
-- **Storage behavior**: JSON file is auto-deleted when all todos are completed.
+- **`add_todos`**
+  - **Purpose:** Create multiple tasks in one batch (preferred over `add_todo`).
+  - **Inputs:** Array of items; `priority` (low/medium/high), `category` (work/bug/testing/docs).
 
-## 5. Error Handling Strategy
+- **`update_todo`**
+  - **Purpose:** Modify fields of an existing todo.
+  - **Inputs:** `id` required; at least one field (`description`, `priority`, etc.) must be provided.
+  - **Common failure modes:** `E_BAD_REQUEST` if no update fields provided.
 
-- **`E_NOT_FOUND`**: Call `list_todos` with the right `status` to locate the ID.
-- **`E_INVALID_PARAMS`**: Fix enum values or ISO-8601 date formats.
-- **`E_BAD_REQUEST`**: Provide at least one update field.
-- **`E_STORAGE_CONFLICT`**: Re-list then retry the mutation once.
-- **`E_STORAGE_TOO_LARGE`**: Complete/delete old items to reduce size.
+- **`complete_todo`**
+  - **Purpose:** Mark a task as completed.
+  - **Side effects:** Idempotent; records `completedAt` timestamp.
+
+- **`delete_todo`**
+  - **Purpose:** Permanently remove a task.
+  - **Side effects:** Destructive; **confirm intent** before calling.
+
+## 4. Error Handling Strategy
+
+- **`E_NOT_FOUND`**: Call `list_todos` to verify IDs.
+- **`E_INVALID_PARAMS`**: Check enum values and date formats.
+- **`E_STORAGE_CONFLICT`**: Retry the operation (concurrency handled internally but may bubble up).
+- **`E_STORAGE_TOO_LARGE`**: Delete completed items to free space.
