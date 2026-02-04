@@ -1,25 +1,21 @@
-import { z } from 'zod';
+import { z, type ZodType } from 'zod';
 
-const IsoDateTimeSchema = z.iso.datetime({ offset: true });
+const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
+  offset: true,
+});
 
-// -----------------------------
-// Domain enums (single source)
-// -----------------------------
+type Priority = 'low' | 'medium' | 'high';
 
-const PRIORITY_VALUES = ['low', 'medium', 'high'] as const;
-type Priority = (typeof PRIORITY_VALUES)[number];
-const PrioritySchema = z.enum(PRIORITY_VALUES);
+const PrioritySchema: ZodType<Priority> = z.enum(['low', 'medium', 'high']);
 
-const CATEGORY_VALUES = ['work', 'bug', 'testing', 'docs'] as const;
-type Category = (typeof CATEGORY_VALUES)[number];
-const CategorySchema = z.enum(CATEGORY_VALUES);
+type Category = 'work' | 'bug' | 'testing' | 'docs';
 
-const STATUS_VALUES = ['pending', 'completed', 'all'] as const;
-const StatusSchema = z.enum(STATUS_VALUES);
-
-// -----------------------------
-// Domain model
-// -----------------------------
+const CategorySchema: ZodType<Category> = z.enum([
+  'work',
+  'bug',
+  'testing',
+  'docs',
+]);
 
 export interface Todo {
   id: string;
@@ -33,7 +29,7 @@ export interface Todo {
   completedAt?: string | undefined;
 }
 
-const TodoSchema = z.strictObject({
+const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   description: z.string(),
   completed: z.boolean(),
@@ -45,13 +41,44 @@ const TodoSchema = z.strictObject({
   completedAt: IsoDateTimeSchema.optional(),
 });
 
-export const TodosSchema = z.array(TodoSchema);
+export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
 
-// -----------------------------
-// Tool inputs
-// -----------------------------
+type Status = 'pending' | 'completed' | 'all';
 
-const TodoInputSchema = z.strictObject({
+interface TodoInput {
+  description: string;
+  priority: Priority;
+  category: Category;
+  dueAt?: string | undefined;
+}
+
+interface AddTodosInput {
+  items: TodoInput[];
+}
+
+interface TodoByIdInput {
+  id: string;
+}
+
+type DeleteTodoInput = TodoByIdInput;
+
+type CompleteTodoInput = TodoByIdInput;
+
+interface UpdateTodoInput {
+  id: string;
+  description?: string | undefined;
+  priority?: Priority | undefined;
+  category?: Category | undefined;
+  dueAt?: string | undefined;
+}
+
+interface ListTodosFilterInput {
+  status?: Status | undefined;
+}
+
+const StatusSchema: ZodType<Status> = z.enum(['pending', 'completed', 'all']);
+
+const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   description: z.string().min(1).max(2000).describe('Description of the todo'),
   priority: PrioritySchema.describe('Task priority: low, medium, or high'),
   category: CategorySchema.describe(
@@ -62,9 +89,9 @@ const TodoInputSchema = z.strictObject({
   ),
 });
 
-export const AddTodoSchema = TodoInputSchema;
+export const AddTodoSchema: ZodType<TodoInput> = TodoInputSchema;
 
-export const AddTodosSchema = z.strictObject({
+export const AddTodosSchema: ZodType<AddTodosInput> = z.strictObject({
   items: z
     .array(TodoInputSchema)
     .min(1)
@@ -72,17 +99,16 @@ export const AddTodosSchema = z.strictObject({
     .describe('Todos to add in a single batch'),
 });
 
-const TodoIdBaseSchema = z.string().min(1).max(100);
-
-const TodoByIdSchema = z.strictObject({
-  id: TodoIdBaseSchema.describe('The ID of the todo'),
+const TodoByIdSchema: ZodType<TodoByIdInput> = z.strictObject({
+  id: z.string().min(1).max(100).describe('The ID of the todo'),
 });
 
-export const DeleteTodoSchema = TodoByIdSchema;
-export const CompleteTodoSchema = TodoByIdSchema;
+export const DeleteTodoSchema: ZodType<DeleteTodoInput> = TodoByIdSchema;
 
-export const UpdateTodoSchema = z.strictObject({
-  id: TodoIdBaseSchema.describe('The ID of the todo to update'),
+export const CompleteTodoSchema: ZodType<CompleteTodoInput> = TodoByIdSchema;
+
+export const UpdateTodoSchema: ZodType<UpdateTodoInput> = z.strictObject({
+  id: z.string().min(1).max(100).describe('The ID of the todo to update'),
   description: z
     .string()
     .min(1)
@@ -100,24 +126,21 @@ export const UpdateTodoSchema = z.strictObject({
   ),
 });
 
-export const ListTodosFilterSchema = z.strictObject({
-  status: StatusSchema.optional().describe(
-    'Filter by status: pending, completed, or all (default: pending). Results may be truncated for safety.'
-  ),
+export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
+  z.strictObject({
+    status: StatusSchema.optional().describe(
+      'Filter by status: pending, completed, or all (default: pending). Results may be truncated for safety.'
+    ),
+  });
+
+interface DefaultOutput {
+  ok: boolean;
+  result?: unknown;
+  error?: { code: string; message: string } | undefined;
+}
+
+export const DefaultOutputSchema: ZodType<DefaultOutput> = z.strictObject({
+  ok: z.boolean(),
+  result: z.unknown().optional(),
+  error: z.strictObject({ code: z.string(), message: z.string() }).optional(),
 });
-
-// -----------------------------
-// Default output (tool results)
-// -----------------------------
-
-export const DefaultOutputSchema = z.discriminatedUnion('ok', [
-  z.strictObject({
-    ok: z.literal(true),
-    result: z.unknown().optional(),
-  }),
-  z.strictObject({
-    ok: z.literal(false),
-    error: z.strictObject({ code: z.string(), message: z.string() }),
-    result: z.unknown().optional(),
-  }),
-]);

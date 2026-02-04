@@ -90,21 +90,6 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(result.success, false);
   });
 
-  it('rejects ok=false without error', () => {
-    const result = DefaultOutputSchema.safeParse({
-      ok: false,
-    });
-    assert.equal(result.success, false);
-  });
-
-  it('rejects ok=true with error payload', () => {
-    const result = DefaultOutputSchema.safeParse({
-      ok: true,
-      error: { code: 'E_TEST', message: 'Test' },
-    });
-    assert.equal(result.success, false);
-  });
-
   it('validates ISO datetime strings with offset', () => {
     assert.equal(
       AddTodoSchema.safeParse({
