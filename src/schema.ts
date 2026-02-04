@@ -133,14 +133,25 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
     ),
   });
 
-interface DefaultOutput {
-  ok: boolean;
-  result?: unknown;
-  error?: { code: string; message: string } | undefined;
-}
+type DefaultOutput =
+  | { ok: true; result?: unknown }
+  | {
+      ok: false;
+      error: { code: string; message: string };
+      result?: unknown;
+    };
 
-export const DefaultOutputSchema: ZodType<DefaultOutput> = z.strictObject({
-  ok: z.boolean(),
-  result: z.unknown().optional(),
-  error: z.strictObject({ code: z.string(), message: z.string() }).optional(),
-});
+export const DefaultOutputSchema: ZodType<DefaultOutput> = z.discriminatedUnion(
+  'ok',
+  [
+    z.strictObject({
+      ok: z.literal(true),
+      result: z.unknown().optional(),
+    }),
+    z.strictObject({
+      ok: z.literal(false),
+      error: z.strictObject({ code: z.string(), message: z.string() }),
+      result: z.unknown().optional(),
+    }),
+  ]
+);

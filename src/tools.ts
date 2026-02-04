@@ -18,6 +18,7 @@ import type {
 
 import type { z } from 'zod';
 
+import { TOOL_ABORT_ERROR_NAME, TOOL_TIMEOUT_ERROR_NAME } from './constants.js';
 import {
   nowMs,
   publishToolCallWithId,
@@ -51,8 +52,6 @@ import {
 } from './storage.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
-const TOOL_ABORT_ERROR_NAME = 'TodokitToolAbort';
-const TOOL_TIMEOUT_ERROR_NAME = 'TodokitToolTimeout';
 
 let isInitialized = (): boolean => true;
 
@@ -76,10 +75,12 @@ function isDefined<T>(value: T | null | undefined): value is T {
 }
 
 function createAbortPromise(
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  onAbort?: () => void
 ): { promise: Promise<never>; cancel: () => void } | null {
   if (!signal) return null;
   if (signal.aborted) {
+    onAbort?.();
     const error = new Error('Tool cancelled');
     error.name = TOOL_ABORT_ERROR_NAME;
     return { promise: Promise.reject(error), cancel: () => undefined };
@@ -87,6 +88,7 @@ function createAbortPromise(
   let listener: (() => void) | null = null;
   const promise = new Promise<never>((_, reject) => {
     listener = () => {
+      onAbort?.();
       const error = new Error('Tool cancelled');
       error.name = TOOL_ABORT_ERROR_NAME;
       reject(error);
@@ -105,11 +107,13 @@ function createAbortPromise(
 
 function createTimeoutPromise(
   ms: number,
-  message: string
+  message: string,
+  onTimeout?: () => void
 ): { promise: Promise<never>; cancel: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const promise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
+      onTimeout?.();
       const error = new Error(message);
       error.name = TOOL_TIMEOUT_ERROR_NAME;
       reject(error);
@@ -234,10 +238,16 @@ function createWrappedHandler<InputArgs extends AnySchema>(
       publishSuccessResult(tool, requestId, start, response);
       return Promise.resolve(response);
     }
+    const controller = new AbortController();
+    const propagateAbort = (): void => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+    };
+
     let result: CallToolResult | Promise<CallToolResult>;
     try {
       result = runWithRequestContext({ requestId, tool }, () =>
-        handler(input, extra)
+        handler(input, { ...extra, signal: controller.signal })
       );
     } catch (error: unknown) {
       publishFailureResult(tool, requestId, start);
@@ -248,9 +258,13 @@ function createWrappedHandler<InputArgs extends AnySchema>(
 
     const timeoutMs = getToolTimeoutMs();
     const timeout = timeoutMs
-      ? createTimeoutPromise(timeoutMs, `Tool ${tool} timed out`)
+      ? createTimeoutPromise(
+          timeoutMs,
+          `Tool ${tool} timed out`,
+          propagateAbort
+        )
       : null;
-    const abort = createAbortPromise(extra.signal);
+    const abort = createAbortPromise(extra.signal, propagateAbort);
     const race = Promise.race(
       [Promise.resolve(result), timeout?.promise, abort?.promise].filter(
         isDefined
@@ -349,10 +363,16 @@ const addTodoToolConfig = {
   },
 };
 
-async function handleAddTodo(input: AddTodoInput): Promise<CallToolResult> {
+async function handleAddTodo(
+  input: AddTodoInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+): Promise<CallToolResult> {
   const { description, priority, category, dueAt } = input;
   try {
-    const todos = await addTodos([{ description, priority, category, dueAt }]);
+    const todos = await addTodos(
+      [{ description, priority, category, dueAt }],
+      extra.signal
+    );
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (err) {
     const mapped = mapExecutionError(err, 'E_ADD_TODO');
@@ -383,9 +403,12 @@ const addTodosToolConfig = {
   },
 };
 
-async function handleAddTodos(input: AddTodosInput): Promise<CallToolResult> {
+async function handleAddTodos(
+  input: AddTodosInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+): Promise<CallToolResult> {
   try {
-    const todos = await addTodos(input.items);
+    const todos = await addTodos(input.items, extra.signal);
     return buildAddTodosResponse(todos);
   } catch (err) {
     const mapped = mapExecutionError(err, 'E_ADD_TODOS');
@@ -469,9 +492,10 @@ function buildListResponse(params: {
 }
 
 async function handleListTodos(
-  filters: ListTodosFilters
+  filters: ListTodosFilters,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
-  const allTodos = await getTodos();
+  const allTodos = await getTodos(extra.signal);
   const status = resolveStatus(filters.status);
 
   const limit = 50;
@@ -554,9 +578,9 @@ function registerListTodos(server: McpServer): void {
         idempotentHint: true,
       },
     },
-    async (filters) => {
+    async (filters, extra) => {
       try {
-        return await handleListTodos(filters);
+        return await handleListTodos(filters, extra);
       } catch (err) {
         const mapped = mapExecutionError(err, 'E_LIST_TODOS');
         return createErrorResponse(mapped.code, mapped.message);
@@ -586,10 +610,13 @@ function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
 }
 
 async function handleUpdateTodo(
-  input: UpdateTodoInput
+  input: UpdateTodoInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
-  const outcome = await updateTodoById(input.id, () =>
-    buildUpdatePayload(input)
+  const outcome = await updateTodoById(
+    input.id,
+    () => buildUpdatePayload(input),
+    extra.signal
   );
   if (outcome.kind === 'error') {
     return outcome.response;
@@ -622,9 +649,9 @@ function registerUpdateTodo(server: McpServer): void {
         idempotentHint: true,
       },
     },
-    async (input) => {
+    async (input, extra) => {
       try {
-        return await handleUpdateTodo(input);
+        return await handleUpdateTodo(input, extra);
       } catch (err) {
         const mapped = mapExecutionError(err, 'E_UPDATE_TODO');
         return createErrorResponse(mapped.code, mapped.message);
@@ -663,9 +690,10 @@ function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
 }
 
 async function handleCompleteTodo(
-  input: CompleteTodoInput
+  input: CompleteTodoInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
-  const outcome = await completeTodoById(input.id, true);
+  const outcome = await completeTodoById(input.id, true, extra.signal);
   return buildOutcomeResponse(outcome);
 }
 
@@ -683,9 +711,9 @@ function registerCompleteTodo(server: McpServer): void {
         idempotentHint: true,
       },
     },
-    async (input) => {
+    async (input, extra) => {
       try {
-        return await handleCompleteTodo(input);
+        return await handleCompleteTodo(input, extra);
       } catch (err) {
         const mapped = mapExecutionError(err, 'E_COMPLETE_TODO');
         return createErrorResponse(mapped.code, mapped.message);
@@ -708,9 +736,10 @@ function buildDeleteResponse(todo: Todo): CallToolResult {
 }
 
 async function handleDeleteTodo(
-  input: DeleteTodoInput
+  input: DeleteTodoInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
-  const outcome = await deleteTodoById(input.id);
+  const outcome = await deleteTodoById(input.id, extra.signal);
   if (outcome.kind === 'error') {
     return outcome.response;
   }
@@ -732,9 +761,9 @@ function registerDeleteTodo(server: McpServer): void {
         destructiveHint: true,
       },
     },
-    async (input) => {
+    async (input, extra) => {
       try {
-        return await handleDeleteTodo(input);
+        return await handleDeleteTodo(input, extra);
       } catch (err) {
         const mapped = mapExecutionError(err, 'E_DELETE_TODO');
         return createErrorResponse(mapped.code, mapped.message);

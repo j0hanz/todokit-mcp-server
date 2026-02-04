@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
+import { TOOL_ABORT_ERROR_NAME } from './constants.js';
 import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
 import { type Todo, TodosSchema } from './schema.js';
@@ -14,17 +15,34 @@ interface FileMetadata {
 interface IFileSystem {
   read(
     path: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal | undefined }
   ): Promise<string | null>;
   writeAtomic(
     path: string,
     content: string,
-    timeoutMs: number
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
   ): Promise<number>;
-  delete(path: string, timeoutMs: number): Promise<void>;
-  getMetadata(path: string, timeoutMs: number): Promise<FileMetadata | null>;
-  getMtime(path: string, timeoutMs: number): Promise<number | null>;
-  getSize(path: string, timeoutMs: number): Promise<number | null>;
+  delete(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<void>;
+  getMetadata(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<FileMetadata | null>;
+  getMtime(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<number | null>;
+  getSize(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<number | null>;
   ensureDir(path: string): Promise<void>;
 }
 
@@ -73,6 +91,19 @@ function isNotFoundError(error: unknown): boolean {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = TOOL_ABORT_ERROR_NAME;
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal) return;
+  if (signal.aborted) {
+    throw createAbortError('Tool cancelled');
+  }
 }
 
 class EnvStorageConfig implements IStorageConfig {
@@ -134,17 +165,19 @@ class NodeFileSystem implements IFileSystem {
 
   async read(
     path: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal | undefined }
   ): Promise<string | null> {
     try {
       return await readFile(path, {
         encoding: 'utf8',
-        signal: options?.signal ?? AbortSignal.timeout(this.config.ioTimeoutMs),
+        signal: this.createIoSignal(this.config.ioTimeoutMs, options?.signal),
       });
     } catch (error) {
       if (isNotFoundError(error)) return null;
       if (isAbortError(error)) {
-        if (options?.signal) throw error;
+        if (options?.signal?.aborted) {
+          throw createAbortError('Tool cancelled');
+        }
         throw this.createTimeoutError('File read timed out');
       }
       throw error;
@@ -154,44 +187,63 @@ class NodeFileSystem implements IFileSystem {
   async writeAtomic(
     path: string,
     content: string,
-    timeoutMs: number
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
   ): Promise<number> {
     await this.ensureDir(dirname(path));
     const tempPath = `${path}.${randomUUID()}.tmp`;
 
     try {
-      await writeFile(tempPath, content, {
-        encoding: 'utf8',
-        flush: true,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      try {
+        await writeFile(tempPath, content, {
+          encoding: 'utf8',
+          flush: true,
+          signal: this.createIoSignal(timeoutMs, options?.signal),
+        });
+      } catch (error) {
+        if (isAbortError(error)) {
+          if (options?.signal?.aborted) {
+            throw createAbortError('Tool cancelled');
+          }
+          throw this.createTimeoutError('File write timed out');
+        }
+        throw error;
+      }
       return await this.renameWithRetry(tempPath, path);
     } finally {
       await rm(tempPath, { force: true }).catch(() => undefined);
     }
   }
 
-  async delete(path: string, timeoutMs: number): Promise<void> {
+  async delete(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<void> {
     try {
       await this.withTimeout(
         rm(path, { force: true }),
         timeoutMs,
-        'File remove timed out'
+        'File remove timed out',
+        options?.signal
       );
     } catch (error) {
-      if (!isNotFoundError(error)) throw error;
+      if (isNotFoundError(error)) return;
+      throw error;
     }
   }
 
   async getMetadata(
     path: string,
-    timeoutMs: number
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
   ): Promise<FileMetadata | null> {
     try {
       const stats = await this.withTimeout(
         stat(path),
         timeoutMs,
-        'File stat timed out'
+        'File stat timed out',
+        options?.signal
       );
       return { mtimeMs: stats.mtimeMs, size: stats.size };
     } catch (error) {
@@ -200,18 +252,71 @@ class NodeFileSystem implements IFileSystem {
     }
   }
 
-  async getMtime(path: string, timeoutMs: number): Promise<number | null> {
-    const meta = await this.getMetadata(path, timeoutMs);
+  async getMtime(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<number | null> {
+    const meta = await this.getMetadata(path, timeoutMs, options);
     return meta?.mtimeMs ?? null;
   }
 
-  async getSize(path: string, timeoutMs: number): Promise<number | null> {
-    const meta = await this.getMetadata(path, timeoutMs);
+  async getSize(
+    path: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal | undefined }
+  ): Promise<number | null> {
+    const meta = await this.getMetadata(path, timeoutMs, options);
     return meta?.size ?? null;
   }
 
   async ensureDir(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
+  }
+
+  private createIoSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    message: string,
+    signal?: AbortSignal
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let abortListener: (() => void) | undefined;
+
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(this.createTimeoutError(message));
+      }, ms);
+    });
+
+    const abort = signal
+      ? new Promise<never>((_, reject) => {
+          if (signal.aborted) {
+            reject(createAbortError('Tool cancelled'));
+            return;
+          }
+          abortListener = () => {
+            reject(createAbortError('Tool cancelled'));
+          };
+          signal.addEventListener('abort', abortListener, { once: true });
+        })
+      : null;
+
+    try {
+      const racers: Promise<T>[] = [promise, timeout];
+      if (abort) racers.push(abort);
+      return await Promise.race(racers);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (abortListener && signal) {
+        signal.removeEventListener('abort', abortListener);
+      }
+    }
   }
 
   private async renameWithRetry(from: string, to: string): Promise<number> {
@@ -233,25 +338,6 @@ class NodeFileSystem implements IFileSystem {
     const code = getSystemErrorCode(error);
     const isTransient = code && ['EBUSY', 'EPERM', 'EACCES'].includes(code);
     return !!isTransient && attempt < 2;
-  }
-
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    message: string
-  ): Promise<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(this.createTimeoutError(message));
-      }, ms);
-    });
-
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
   }
 
   private createTimeoutError(message: string): Error {
@@ -321,23 +407,28 @@ class JsonFileStore<T> {
     }
   ) {}
 
-  async read(): Promise<T> {
+  async read(signal?: AbortSignal): Promise<T> {
     const start = nowMs();
     await this.writeQueue;
+    throwIfAborted(signal);
 
     const path = this.config.todoFilePath;
-    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs);
+    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs, {
+      signal,
+    });
     const mtimeMs = metadata?.mtimeMs ?? null;
+    throwIfAborted(signal);
 
     if (this.cache?.mtimeMs === mtimeMs) {
       this.publishReadEvent(start, true, this.getItemCount(this.cache.data));
       return this.cache.data;
     }
 
-    const data = await this.loadFromFile(path, metadata?.size);
+    const data = await this.loadFromFile(path, metadata?.size, signal);
     const finalMtimeMs = metadata
       ? mtimeMs
-      : await this.fs.getMtime(path, this.config.ioTimeoutMs);
+      : await this.fs.getMtime(path, this.config.ioTimeoutMs, { signal });
+    throwIfAborted(signal);
 
     this.cache = { data, mtimeMs: finalMtimeMs };
 
@@ -346,20 +437,24 @@ class JsonFileStore<T> {
   }
 
   async transaction<R>(
-    operation: (current: T) => { next: T; result: R; deleteFile?: boolean }
+    operation: (current: T) => { next: T; result: R; deleteFile?: boolean },
+    signal?: AbortSignal
   ): Promise<R> {
     return this.enqueue(async () => {
       const path = this.config.todoFilePath;
+      throwIfAborted(signal);
 
       for (
         let attempt = 0;
         attempt <= this.config.maxConflictRetries;
         attempt++
       ) {
+        throwIfAborted(signal);
         const step = await this.attemptTransactionStep(
           path,
           operation,
-          attempt
+          attempt,
+          signal
         );
         if (step.kind === 'success') {
           return step.result as R;
@@ -396,28 +491,40 @@ class JsonFileStore<T> {
   private async attemptTransactionStep<R>(
     path: string,
     operation: (current: T) => { next: T; result: R; deleteFile?: boolean },
-    attempt: number
+    attempt: number,
+    signal?: AbortSignal
   ): Promise<TransactionStepResult<R>> {
-    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs);
+    throwIfAborted(signal);
+    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs, {
+      signal,
+    });
     const initialMtimeMs = metadata?.mtimeMs ?? null;
 
     let current: T;
     if (this.cache?.mtimeMs === initialMtimeMs) {
       current = this.cache.data;
     } else {
-      current = await this.loadFromFile(path, metadata?.size);
+      current = await this.loadFromFile(path, metadata?.size, signal);
     }
     const mtimeMs = metadata
       ? initialMtimeMs
-      : await this.fs.getMtime(path, this.config.ioTimeoutMs);
+      : await this.fs.getMtime(path, this.config.ioTimeoutMs, { signal });
     this.cache = { data: current, mtimeMs };
+    throwIfAborted(signal);
     const { next, result, deleteFile } = operation(current);
     if (next === current && !deleteFile) {
       return { kind: 'success', result };
     }
     const release = await this.locks.acquire(path, this.config.lockTimeoutMs);
     try {
-      const latestMtime = await this.fs.getMtime(path, this.config.ioTimeoutMs);
+      throwIfAborted(signal);
+      const latestMtime = await this.fs.getMtime(
+        path,
+        this.config.ioTimeoutMs,
+        {
+          signal,
+        }
+      );
       if (latestMtime !== mtimeMs) {
         if (attempt >= this.config.maxConflictRetries) {
           return {
@@ -430,10 +537,11 @@ class JsonFileStore<T> {
         }
         return { kind: 'retry' };
       }
+      throwIfAborted(signal);
       if (deleteFile) {
-        await this.deleteFile(path);
+        await this.deleteFile(path, signal);
       } else {
-        await this.saveFile(path, next);
+        await this.saveFile(path, next, signal);
       }
       return { kind: 'success', result };
     } finally {
@@ -450,9 +558,15 @@ class JsonFileStore<T> {
     return run;
   }
 
-  private async loadFromFile(path: string, sizeHint?: number): Promise<T> {
+  private async loadFromFile(
+    path: string,
+    sizeHint: number | undefined,
+    signal?: AbortSignal
+  ): Promise<T> {
+    throwIfAborted(signal);
     const size =
-      sizeHint ?? (await this.fs.getSize(path, this.config.ioTimeoutMs));
+      sizeHint ??
+      (await this.fs.getSize(path, this.config.ioTimeoutMs, { signal }));
 
     if (size !== null && size > this.config.maxTodoFileBytes) {
       throw createCodedError(
@@ -461,13 +575,15 @@ class JsonFileStore<T> {
       );
     }
 
-    const raw = await this.fs.read(path);
+    const raw = await this.fs.read(path, { signal });
+    throwIfAborted(signal);
     if (!raw) {
       const emptyParse = this.schema.safeParse([]);
       if (emptyParse.success && emptyParse.data) return emptyParse.data;
       throw new Error('Schema does not support empty state');
     }
 
+    throwIfAborted(signal);
     const parsed: unknown = JSON.parse(raw);
     const result = this.schema.safeParse(parsed);
     if (!result.success || !result.data) {
@@ -476,18 +592,26 @@ class JsonFileStore<T> {
     return result.data;
   }
 
-  private async saveFile(path: string, data: T): Promise<void> {
+  private async saveFile(
+    path: string,
+    data: T,
+    signal?: AbortSignal
+  ): Promise<void> {
     const start = nowMs();
+    throwIfAborted(signal);
     const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}\n`;
     const renameRetries = await this.fs.writeAtomic(
       path,
       payload,
-      this.config.writeTimeoutMs
+      this.config.writeTimeoutMs,
+      { signal }
     );
 
     this.cache = {
       data,
-      mtimeMs: await this.fs.getMtime(path, this.config.ioTimeoutMs),
+      mtimeMs: await this.fs.getMtime(path, this.config.ioTimeoutMs, {
+        signal,
+      }),
     };
 
     publishStorageEvent({
@@ -501,9 +625,10 @@ class JsonFileStore<T> {
     });
   }
 
-  private async deleteFile(path: string): Promise<void> {
+  private async deleteFile(path: string, signal?: AbortSignal): Promise<void> {
     const start = nowMs();
-    await this.fs.delete(path, this.config.writeTimeoutMs);
+    throwIfAborted(signal);
+    await this.fs.delete(path, this.config.writeTimeoutMs, { signal });
 
     const emptyResult = this.schema.safeParse([]);
     if (!emptyResult.success || !emptyResult.data) {
@@ -570,11 +695,11 @@ interface NewTodoInput {
 class TodoRepository {
   constructor(private readonly store: JsonFileStore<Todo[]>) {}
 
-  async getAll(): Promise<readonly Todo[]> {
-    return this.store.read();
+  async getAll(signal?: AbortSignal): Promise<readonly Todo[]> {
+    return this.store.read(signal);
   }
 
-  async addMany(items: NewTodoInput[]): Promise<Todo[]> {
+  async addMany(items: NewTodoInput[], signal?: AbortSignal): Promise<Todo[]> {
     const timestamp = new Date().toISOString();
 
     return this.store.transaction<Todo[]>((todos) => {
@@ -594,22 +719,31 @@ class TodoRepository {
         next: [...todos, ...newTodos],
         result: newTodos,
       };
-    });
+    }, signal);
   }
 
   async update(
     id: string,
-    buildUpdates: (todo: Todo) => TodoUpdate | null
+    buildUpdates: (todo: Todo) => TodoUpdate | null,
+    signal?: AbortSignal
   ): Promise<MatchOutcome | { kind: 'no_updates' }> {
     return this.store.transaction<MatchOutcome | { kind: 'no_updates' }>(
       (todos) => {
-        const index = todos.findIndex((t) => t.id === id);
-        if (index === -1) {
-          return { next: todos, result: this.createNotFound(id) };
+        let index = -1;
+        let current: Todo | undefined;
+        let incompleteCount = 0;
+
+        for (let i = 0; i < todos.length; i++) {
+          const todo = todos[i];
+          if (!todo) continue;
+          if (!todo.completed) incompleteCount += 1;
+          if (todo.id === id) {
+            index = i;
+            current = todo;
+          }
         }
 
-        const current = todos[index];
-        if (!current) {
+        if (index === -1 || !current) {
           return { next: todos, result: this.createNotFound(id) };
         }
 
@@ -625,63 +759,91 @@ class TodoRepository {
 
         const updated = this.applyUpdates(current, updates);
         const nextTodos = todos.with(index, updated);
+        let nextIncompleteCount = incompleteCount;
+        if (current.completed !== updated.completed) {
+          nextIncompleteCount += updated.completed ? -1 : 1;
+        }
 
         return {
           next: nextTodos,
           result: { kind: 'match', todo: updated },
-          deleteFile: this.shouldDeleteFile(nextTodos),
+          deleteFile: nextTodos.length > 0 && nextIncompleteCount === 0,
         };
-      }
+      },
+      signal
     );
   }
 
-  async delete(id: string): Promise<MatchOutcome> {
+  async delete(id: string, signal?: AbortSignal): Promise<MatchOutcome> {
     return this.store.transaction<MatchOutcome>((todos) => {
-      const index = todos.findIndex((t) => t.id === id);
-      if (index === -1) {
-        return { next: todos, result: this.createNotFound(id) };
+      let match: Todo | undefined;
+      const nextTodos: Todo[] = [];
+      let incompleteCount = 0;
+
+      for (const todo of todos) {
+        if (todo.id === id) {
+          match = todo;
+          continue;
+        }
+        nextTodos.push(todo);
+        if (!todo.completed) incompleteCount += 1;
       }
 
-      const match = todos[index];
-      if (!match) return { next: todos, result: this.createNotFound(id) };
-
-      const nextTodos = todos.filter((t) => t.id !== id);
+      if (!match) {
+        return { next: todos, result: this.createNotFound(id) };
+      }
 
       return {
         next: nextTodos,
         result: { kind: 'match', todo: match },
-        deleteFile: this.shouldDeleteFile(nextTodos),
+        deleteFile: nextTodos.length > 0 && incompleteCount === 0,
       };
-    });
+    }, signal);
   }
 
-  async complete(id: string, completed: boolean): Promise<CompleteTodoOutcome> {
+  async complete(
+    id: string,
+    completed: boolean,
+    signal?: AbortSignal
+  ): Promise<CompleteTodoOutcome> {
     return this.store.transaction<CompleteTodoOutcome>((todos) => {
-      const index = todos.findIndex((t) => t.id === id);
-      if (index === -1) {
-        return { next: todos, result: this.createNotFound(id) };
+      let index = -1;
+      let current: Todo | undefined;
+      let incompleteCount = 0;
+
+      for (let i = 0; i < todos.length; i++) {
+        const todo = todos[i];
+        if (!todo) continue;
+        if (!todo.completed) incompleteCount += 1;
+        if (todo.id === id) {
+          index = i;
+          current = todo;
+        }
       }
 
-      const current = todos[index];
-      if (!current) return { next: todos, result: this.createNotFound(id) };
+      if (index === -1 || !current) {
+        return { next: todos, result: this.createNotFound(id) };
+      }
 
       if (current.completed === completed) {
         return {
           next: todos,
           result: { kind: 'already', todo: current },
-          deleteFile: this.shouldDeleteFile(todos),
+          deleteFile: todos.length > 0 && incompleteCount === 0,
         };
       }
 
       const updated = this.applyUpdates(current, { completed });
       const nextTodos = todos.with(index, updated);
+      let nextIncompleteCount = incompleteCount;
+      nextIncompleteCount += completed ? -1 : 1;
 
       return {
         next: nextTodos,
         result: { kind: 'match', todo: updated },
-        deleteFile: this.shouldDeleteFile(nextTodos),
+        deleteFile: nextTodos.length > 0 && nextIncompleteCount === 0,
       };
-    });
+    }, signal);
   }
 
   async close(): Promise<void> {
@@ -722,10 +884,6 @@ class TodoRepository {
     }
     return updated;
   }
-
-  private shouldDeleteFile(todos: Todo[]): boolean {
-    return todos.length > 0 && todos.every((t) => t.completed);
-  }
 }
 
 const config = new EnvStorageConfig();
@@ -734,30 +892,38 @@ const locks = new FileLockManager();
 const store = new JsonFileStore<Todo[]>(fs, locks, config, TodosSchema);
 const repository = new TodoRepository(store);
 
-export async function getTodos(): Promise<readonly Todo[]> {
-  return repository.getAll();
+export async function getTodos(signal?: AbortSignal): Promise<readonly Todo[]> {
+  return repository.getAll(signal);
 }
 
-export function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
-  return repository.addMany(items);
+export function addTodos(
+  items: NewTodoInput[],
+  signal?: AbortSignal
+): Promise<Todo[]> {
+  return repository.addMany(items, signal);
 }
 
 export async function updateTodoById(
   id: string,
-  buildUpdates: (todo: Todo) => TodoUpdate | null
+  buildUpdates: (todo: Todo) => TodoUpdate | null,
+  signal?: AbortSignal
 ): Promise<MatchOutcome | { kind: 'no_updates' }> {
-  return repository.update(id, buildUpdates);
+  return repository.update(id, buildUpdates, signal);
 }
 
-export async function deleteTodoById(id: string): Promise<MatchOutcome> {
-  return repository.delete(id);
+export async function deleteTodoById(
+  id: string,
+  signal?: AbortSignal
+): Promise<MatchOutcome> {
+  return repository.delete(id, signal);
 }
 
 export async function completeTodoById(
   id: string,
-  completed: boolean
+  completed: boolean,
+  signal?: AbortSignal
 ): Promise<CompleteTodoOutcome> {
-  return repository.complete(id, completed);
+  return repository.complete(id, completed, signal);
 }
 
 export async function closeDb(): Promise<void> {
