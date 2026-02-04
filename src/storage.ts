@@ -94,7 +94,12 @@ function createCodedError(code: string, message: string): StorageError {
 }
 
 function getSystemErrorCode(error: unknown): string | undefined {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as Record<string, unknown>).code === 'string'
+  ) {
     return (error as { code: string }).code;
   }
   return undefined;
@@ -535,7 +540,11 @@ class JsonFileStore<T> {
         if (step.kind === 'success') return step.result;
         if (step.kind === 'fail') throw step.error;
 
-        await sleep(25 * (attempt + 1), signal);
+        // Exponential backoff with jitter
+        const backoffMs =
+          // eslint-disable-next-line sonarjs/pseudo-random
+          25 * Math.pow(2, attempt) + Math.random() * 20;
+        await sleep(backoffMs, signal);
       }
 
       throw createCodedError(
