@@ -10,7 +10,6 @@ import {
 } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
-  type CallToolResult,
   ErrorCode,
   type InitializeRequest,
   InitializeRequestSchema,
@@ -247,56 +246,6 @@ let shuttingDown = false;
 let activeServer: McpServer | null = null;
 let disableDiagnostics: (() => void) | null = null;
 
-function mapToolErrorCode(message: string): string {
-  if (message.startsWith('Input validation error')) return 'E_INVALID_PARAMS';
-  if (message.startsWith('Invalid tools/call request'))
-    return 'E_INVALID_PARAMS';
-  if (message.startsWith('Invalid task creation result'))
-    return 'E_OUTPUT_INVALID';
-  if (message.startsWith('Tool ') && message.includes(' not found'))
-    return 'E_TOOL_NOT_FOUND';
-  if (message.startsWith('Tool ') && message.includes(' disabled'))
-    return 'E_TOOL_DISABLED';
-  if (message.startsWith('Output validation error')) return 'E_OUTPUT_INVALID';
-  return 'E_TOOL_ERROR';
-}
-
-function patchToolErrorResponses(server: McpServer): void {
-  const target = server as unknown as {
-    createToolError?: (message: string) => CallToolResult;
-  };
-  if (typeof target.createToolError !== 'function') {
-    return;
-  }
-
-  const descriptor = Object.getOwnPropertyDescriptor(target, 'createToolError');
-  if (descriptor) {
-    if (descriptor.writable === false && descriptor.set === undefined) {
-      return;
-    }
-  }
-
-  if (!Object.isExtensible(target)) {
-    return;
-  }
-
-  try {
-    target.createToolError = (message: string): CallToolResult => {
-      const structured = {
-        ok: false,
-        error: { code: mapToolErrorCode(message), message },
-      };
-      return {
-        content: [{ type: 'text', text: JSON.stringify(structured) }],
-        structuredContent: structured,
-        isError: true,
-      };
-    };
-  } catch {
-    // Best-effort override; fall back to SDK defaults if not writable.
-  }
-}
-
 export function createServer(): McpServer {
   let initialized = false;
   const isInitialized = (): boolean => initialized;
@@ -339,7 +288,6 @@ export function createServer(): McpServer {
   };
   setInitializationGuard(() => initialized);
 
-  patchToolErrorResponses(server);
   registerAllTools(server);
   return server;
 }

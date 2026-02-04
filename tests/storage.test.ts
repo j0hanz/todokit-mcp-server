@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
-import { parse } from 'node:path';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, parse, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -161,6 +169,49 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
         error instanceof Error &&
         error.message.includes('within the current working directory')
     );
+  });
+
+  it('rejects symlinks pointing outside cwd', async (t) => {
+    delete process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
+
+    // Create a secret file outside CWD
+    const outsideDir = await mkdtemp(join(tmpdir(), 'todokit-secret-'));
+    const secretFile = join(outsideDir, 'secret.json');
+    await writeFile(secretFile, '[]', 'utf8');
+
+    // Create a directory inside CWD
+    const localDir = resolve('dist/tests/temp-storage');
+    await mkdir(localDir, { recursive: true });
+
+    // Create symlink: local -> outside
+    const linkPath = join(localDir, 'todos-link.json');
+    try {
+      await symlink(secretFile, linkPath, 'file');
+    } catch (e) {
+      // Clean up before skipping
+      await rm(outsideDir, { recursive: true, force: true });
+      await rm(localDir, { recursive: true, force: true });
+
+      if ((e as { code?: string }).code === 'EPERM') {
+        t.skip('Skipping symlink test due to Windows EPERM');
+        return;
+      }
+      throw e;
+    }
+
+    process.env.TODOKIT_TODO_FILE = linkPath;
+
+    try {
+      await assert.rejects(
+        () => getTodos(),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes('within the current working directory')
+      );
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+      await rm(localDir, { recursive: true, force: true });
+    }
   });
 
   it('fails fast when a write lock is held', async () => {

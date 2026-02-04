@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import {
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { TOOL_ABORT_ERROR_NAME } from './constants.js';
@@ -51,7 +60,7 @@ interface ILockManager {
 }
 
 interface IStorageConfig {
-  todoFilePath: string;
+  getTodoFilePath(): Promise<string>;
   lockTimeoutMs: number;
   maxTodoFileBytes: number;
   jsonIndentation: number;
@@ -111,11 +120,11 @@ class EnvStorageConfig implements IStorageConfig {
   readonly writeTimeoutMs = 30_000;
   readonly maxConflictRetries = 3;
 
-  get todoFilePath(): string {
+  async getTodoFilePath(): Promise<string> {
     const override = process.env.TODOKIT_TODO_FILE?.trim();
     if (override) {
       const resolved = resolve(override);
-      this.validatePathSafety(resolved);
+      await this.validatePathSafety(resolved);
       return resolved;
     }
     return resolve(process.cwd(), 'todos.json');
@@ -143,10 +152,21 @@ class EnvStorageConfig implements IStorageConfig {
       : null;
   }
 
-  private validatePathSafety(filePath: string): void {
+  private async validatePathSafety(filePath: string): Promise<void> {
     const cwd = resolve(process.cwd());
+
+    let targetPath = filePath;
+    // SECURITY: Resolve symlinks to prevent traversal ([AUDIT-SEC-01])
+    if (existsSync(filePath)) {
+      try {
+        targetPath = await realpath(filePath);
+      } catch {
+        // If realpath fails (e.g. permission), assume unsafe or fall back to strict check
+      }
+    }
+
     const isSafe =
-      this.isPathInside(cwd, filePath) ||
+      this.isPathInside(cwd, targetPath) ||
       !!process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
 
     if (!isSafe) {
@@ -412,7 +432,7 @@ class JsonFileStore<T> {
     await this.writeQueue;
     throwIfAborted(signal);
 
-    const path = this.config.todoFilePath;
+    const path = await this.config.getTodoFilePath();
     const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs, {
       signal,
     });
@@ -441,7 +461,7 @@ class JsonFileStore<T> {
     signal?: AbortSignal
   ): Promise<R> {
     return this.enqueue(async () => {
-      const path = this.config.todoFilePath;
+      const path = await this.config.getTodoFilePath();
       throwIfAborted(signal);
 
       for (
