@@ -1,21 +1,26 @@
 import { z, type ZodType } from 'zod';
 
-const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({
-  offset: true,
-});
+const IsoDateTimeSchema: ZodType<string> = z.iso.datetime({ offset: true });
 
-type Priority = 'low' | 'medium' | 'high';
+// -----------------------------
+// Domain enums (single source)
+// -----------------------------
 
-const PrioritySchema: ZodType<Priority> = z.enum(['low', 'medium', 'high']);
+const PRIORITY_VALUES = ['low', 'medium', 'high'] as const;
+type Priority = (typeof PRIORITY_VALUES)[number];
+const PrioritySchema: ZodType<Priority> = z.enum(PRIORITY_VALUES);
 
-type Category = 'work' | 'bug' | 'testing' | 'docs';
+const CATEGORY_VALUES = ['work', 'bug', 'testing', 'docs'] as const;
+type Category = (typeof CATEGORY_VALUES)[number];
+const CategorySchema: ZodType<Category> = z.enum(CATEGORY_VALUES);
 
-const CategorySchema: ZodType<Category> = z.enum([
-  'work',
-  'bug',
-  'testing',
-  'docs',
-]);
+const STATUS_VALUES = ['pending', 'completed', 'all'] as const;
+type Status = (typeof STATUS_VALUES)[number];
+const StatusSchema: ZodType<Status> = z.enum(STATUS_VALUES);
+
+// -----------------------------
+// Domain model
+// -----------------------------
 
 export interface Todo {
   id: string;
@@ -43,7 +48,9 @@ const TodoSchema: ZodType<Todo> = z.strictObject({
 
 export const TodosSchema: ZodType<Todo[]> = z.array(TodoSchema);
 
-type Status = 'pending' | 'completed' | 'all';
+// -----------------------------
+// Tool inputs
+// -----------------------------
 
 interface TodoInput {
   description: string;
@@ -61,7 +68,6 @@ interface TodoByIdInput {
 }
 
 type DeleteTodoInput = TodoByIdInput;
-
 type CompleteTodoInput = TodoByIdInput;
 
 interface UpdateTodoInput {
@@ -75,8 +81,6 @@ interface UpdateTodoInput {
 interface ListTodosFilterInput {
   status?: Status | undefined;
 }
-
-const StatusSchema: ZodType<Status> = z.enum(['pending', 'completed', 'all']);
 
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   description: z.string().min(1).max(2000).describe('Description of the todo'),
@@ -99,16 +103,17 @@ export const AddTodosSchema: ZodType<AddTodosInput> = z.strictObject({
     .describe('Todos to add in a single batch'),
 });
 
+const TodoIdBaseSchema = z.string().min(1).max(100);
+
 const TodoByIdSchema: ZodType<TodoByIdInput> = z.strictObject({
-  id: z.string().min(1).max(100).describe('The ID of the todo'),
+  id: TodoIdBaseSchema.describe('The ID of the todo'),
 });
 
 export const DeleteTodoSchema: ZodType<DeleteTodoInput> = TodoByIdSchema;
-
 export const CompleteTodoSchema: ZodType<CompleteTodoInput> = TodoByIdSchema;
 
 export const UpdateTodoSchema: ZodType<UpdateTodoInput> = z.strictObject({
-  id: z.string().min(1).max(100).describe('The ID of the todo to update'),
+  id: TodoIdBaseSchema.describe('The ID of the todo to update'),
   description: z
     .string()
     .min(1)
@@ -132,6 +137,10 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       'Filter by status: pending, completed, or all (default: pending). Results may be truncated for safety.'
     ),
   });
+
+// -----------------------------
+// Default output (tool results)
+// -----------------------------
 
 type DefaultOutput =
   | { ok: true; result?: unknown }
