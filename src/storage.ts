@@ -16,23 +16,25 @@ import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
 import { type Todo, TodosSchema } from './schema.js';
 
+const TOOL_CANCELLED_MESSAGE = 'Tool cancelled';
+
 interface FileMetadata {
   mtimeMs: number;
   size: number;
 }
 
-interface IFileSystem {
-  read(
+interface FileSystemPort {
+  readText(
     path: string,
     options?: { signal?: AbortSignal | undefined }
   ): Promise<string | null>;
-  writeAtomic(
+  writeTextAtomic(
     path: string,
     content: string,
     timeoutMs: number,
     options?: { signal?: AbortSignal | undefined }
   ): Promise<number>;
-  delete(
+  deleteFile(
     path: string,
     timeoutMs: number,
     options?: { signal?: AbortSignal | undefined }
@@ -55,11 +57,15 @@ interface IFileSystem {
   ensureDir(path: string): Promise<void>;
 }
 
-interface ILockManager {
-  acquire(path: string, timeoutMs: number): Promise<() => Promise<void>>;
+interface LockPort {
+  acquire(
+    path: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<() => Promise<void>>;
 }
 
-interface IStorageConfig {
+interface StorageConfig {
   getTodoFilePath(): Promise<string>;
   lockTimeoutMs: number;
   maxTodoFileBytes: number;
@@ -102,8 +108,8 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-function createAbortError(message: string): Error {
-  const error = new Error(message);
+function createToolCancelledError(): Error {
+  const error = new Error(TOOL_CANCELLED_MESSAGE);
   error.name = TOOL_ABORT_ERROR_NAME;
   return error;
 }
@@ -111,11 +117,41 @@ function createAbortError(message: string): Error {
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal) return;
   if (signal.aborted) {
-    throw createAbortError('Tool cancelled');
+    throw createToolCancelledError();
   }
 }
 
-class EnvStorageConfig implements IStorageConfig {
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  throwIfAborted(signal);
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let abortListener: (() => void) | undefined;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      timeoutId = setTimeout(resolve, ms);
+
+      if (!signal) return;
+      if (signal.aborted) {
+        reject(createToolCancelledError());
+        return;
+      }
+
+      abortListener = () => {
+        reject(createToolCancelledError());
+      };
+      signal.addEventListener('abort', abortListener, { once: true });
+    });
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (signal && abortListener) {
+      signal.removeEventListener('abort', abortListener);
+    }
+  }
+}
+
+class EnvStorageConfig implements StorageConfig {
   readonly ioTimeoutMs = 10_000;
   readonly writeTimeoutMs = 30_000;
   readonly maxConflictRetries = 3;
@@ -146,6 +182,7 @@ class EnvStorageConfig implements IStorageConfig {
   private getEnvInt(name: string): number | null {
     const raw = process.env[name]?.trim();
     if (!raw) return null;
+
     const value = Number(raw);
     return Number.isFinite(value) && Number.isInteger(value) && value >= 0
       ? value
@@ -180,10 +217,10 @@ class EnvStorageConfig implements IStorageConfig {
   }
 }
 
-class NodeFileSystem implements IFileSystem {
-  constructor(private readonly config: IStorageConfig) {}
+class NodeFileSystem implements FileSystemPort {
+  constructor(private readonly config: StorageConfig) {}
 
-  async read(
+  async readText(
     path: string,
     options?: { signal?: AbortSignal | undefined }
   ): Promise<string | null> {
@@ -194,17 +231,11 @@ class NodeFileSystem implements IFileSystem {
       });
     } catch (error) {
       if (isNotFoundError(error)) return null;
-      if (isAbortError(error)) {
-        if (options?.signal?.aborted) {
-          throw createAbortError('Tool cancelled');
-        }
-        throw this.createTimeoutError('File read timed out');
-      }
-      throw error;
+      this.mapIoAbortError(error, options?.signal, 'File read timed out');
     }
   }
 
-  async writeAtomic(
+  async writeTextAtomic(
     path: string,
     content: string,
     timeoutMs: number,
@@ -221,21 +252,16 @@ class NodeFileSystem implements IFileSystem {
           signal: this.createIoSignal(timeoutMs, options?.signal),
         });
       } catch (error) {
-        if (isAbortError(error)) {
-          if (options?.signal?.aborted) {
-            throw createAbortError('Tool cancelled');
-          }
-          throw this.createTimeoutError('File write timed out');
-        }
-        throw error;
+        this.mapIoAbortError(error, options?.signal, 'File write timed out');
       }
+
       return await this.renameWithRetry(tempPath, path);
     } finally {
       await rm(tempPath, { force: true }).catch(() => undefined);
     }
   }
 
-  async delete(
+  async deleteFile(
     path: string,
     timeoutMs: number,
     options?: { signal?: AbortSignal | undefined }
@@ -294,6 +320,18 @@ class NodeFileSystem implements IFileSystem {
     await mkdir(path, { recursive: true });
   }
 
+  private mapIoAbortError(
+    error: unknown,
+    externalSignal: AbortSignal | undefined,
+    timeoutMessage: string
+  ): never {
+    if (!isAbortError(error)) throw error;
+    if (externalSignal?.aborted) {
+      throw createToolCancelledError();
+    }
+    throw this.createTimeoutError(timeoutMessage);
+  }
+
   private createIoSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
@@ -317,11 +355,11 @@ class NodeFileSystem implements IFileSystem {
     const abort = signal
       ? new Promise<never>((_, reject) => {
           if (signal.aborted) {
-            reject(createAbortError('Tool cancelled'));
+            reject(createToolCancelledError());
             return;
           }
           abortListener = () => {
-            reject(createAbortError('Tool cancelled'));
+            reject(createToolCancelledError());
           };
           signal.addEventListener('abort', abortListener, { once: true });
         })
@@ -341,16 +379,18 @@ class NodeFileSystem implements IFileSystem {
 
   private async renameWithRetry(from: string, to: string): Promise<number> {
     let retries = 0;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await rename(from, to);
         return retries;
       } catch (error: unknown) {
         if (!this.shouldRetryRename(error, attempt)) throw error;
-        retries++;
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        retries += 1;
+        await sleep(50 * (attempt + 1));
       }
     }
+
     return retries;
   }
 
@@ -367,14 +407,20 @@ class NodeFileSystem implements IFileSystem {
   }
 }
 
-class FileLockManager implements ILockManager {
-  async acquire(path: string, timeoutMs: number): Promise<() => Promise<void>> {
+class LockFileManager implements LockPort {
+  async acquire(
+    path: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<() => Promise<void>> {
     const lockPath = `${path}.lock`;
     const started = nowMs();
 
     await mkdir(dirname(path), { recursive: true });
 
     for (;;) {
+      throwIfAborted(signal);
+
       try {
         await writeFile(
           lockPath,
@@ -397,7 +443,8 @@ class FileLockManager implements ILockManager {
             'Todo storage is busy; please retry.'
           );
         }
-        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        await sleep(25, signal);
       }
     }
   }
@@ -408,28 +455,35 @@ interface CacheEntry<T> {
   mtimeMs: number | null;
 }
 
-interface TransactionStepResult<R> {
-  kind: 'success' | 'retry' | 'fail';
-  result?: R;
-  error?: Error;
+interface SchemaLike<T> {
+  safeParse: (data: unknown) => { success: boolean; data?: T };
 }
+
+type TransactionMutation<T, R> = (current: T) => {
+  next: T;
+  result: R;
+  deleteFile?: boolean;
+};
+
+type TransactionStepResult<R> =
+  | { kind: 'success'; result: R }
+  | { kind: 'retry' }
+  | { kind: 'fail'; error: Error };
 
 class JsonFileStore<T> {
   private cache: CacheEntry<T> | null = null;
-  private writeQueue: Promise<void> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly fs: IFileSystem,
-    private readonly locks: ILockManager,
-    private readonly config: IStorageConfig,
-    private readonly schema: {
-      safeParse: (data: unknown) => { success: boolean; data?: T };
-    }
+    private readonly fs: FileSystemPort,
+    private readonly locks: LockPort,
+    private readonly config: StorageConfig,
+    private readonly schema: SchemaLike<T>
   ) {}
 
   async read(signal?: AbortSignal): Promise<T> {
     const start = nowMs();
-    await this.writeQueue;
+    await this.queue;
     throwIfAborted(signal);
 
     const path = await this.config.getTodoFilePath();
@@ -457,7 +511,7 @@ class JsonFileStore<T> {
   }
 
   async transaction<R>(
-    operation: (current: T) => { next: T; result: R; deleteFile?: boolean },
+    mutate: TransactionMutation<T, R>,
     signal?: AbortSignal
   ): Promise<R> {
     return this.enqueue(async () => {
@@ -470,20 +524,18 @@ class JsonFileStore<T> {
         attempt++
       ) {
         throwIfAborted(signal);
+
         const step = await this.attemptTransactionStep(
           path,
-          operation,
+          mutate,
           attempt,
           signal
         );
-        if (step.kind === 'success') {
-          return step.result as R;
-        }
-        if (step.kind === 'fail') {
-          throw step.error ?? new Error('Transaction failed');
-        }
-        // retry
-        await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+
+        if (step.kind === 'success') return step.result;
+        if (step.kind === 'fail') throw step.error;
+
+        await sleep(25 * (attempt + 1), signal);
       }
 
       throw createCodedError(
@@ -495,8 +547,8 @@ class JsonFileStore<T> {
 
   async close(): Promise<void> {
     const start = nowMs();
-    await this.writeQueue;
-    this.writeQueue = Promise.resolve();
+    await this.queue;
+    this.queue = Promise.resolve();
     this.cache = null;
 
     publishStorageEvent({
@@ -508,44 +560,61 @@ class JsonFileStore<T> {
     });
   }
 
+  private enqueue<R>(task: () => Promise<R>): Promise<R> {
+    const run = this.queue.then(task, task);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   private async attemptTransactionStep<R>(
     path: string,
-    operation: (current: T) => { next: T; result: R; deleteFile?: boolean },
+    mutate: TransactionMutation<T, R>,
     attempt: number,
     signal?: AbortSignal
   ): Promise<TransactionStepResult<R>> {
     throwIfAborted(signal);
+
     const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs, {
       signal,
     });
     const initialMtimeMs = metadata?.mtimeMs ?? null;
 
-    let current: T;
-    if (this.cache?.mtimeMs === initialMtimeMs) {
-      current = this.cache.data;
-    } else {
-      current = await this.loadFromFile(path, metadata?.size, signal);
-    }
-    const mtimeMs = metadata
+    const current =
+      this.cache?.mtimeMs === initialMtimeMs
+        ? this.cache.data
+        : await this.loadFromFile(path, metadata?.size, signal);
+
+    const knownMtimeMs = metadata
       ? initialMtimeMs
       : await this.fs.getMtime(path, this.config.ioTimeoutMs, { signal });
-    this.cache = { data: current, mtimeMs };
+
+    this.cache = { data: current, mtimeMs: knownMtimeMs };
     throwIfAborted(signal);
-    const { next, result, deleteFile } = operation(current);
+
+    const { next, result, deleteFile } = mutate(current);
     if (next === current && !deleteFile) {
       return { kind: 'success', result };
     }
-    const release = await this.locks.acquire(path, this.config.lockTimeoutMs);
+
+    const release = await this.locks.acquire(
+      path,
+      this.config.lockTimeoutMs,
+      signal
+    );
+
     try {
       throwIfAborted(signal);
+
       const latestMtime = await this.fs.getMtime(
         path,
         this.config.ioTimeoutMs,
-        {
-          signal,
-        }
+        { signal }
       );
-      if (latestMtime !== mtimeMs) {
+
+      if (latestMtime !== knownMtimeMs) {
         if (attempt >= this.config.maxConflictRetries) {
           return {
             kind: 'fail',
@@ -557,25 +626,19 @@ class JsonFileStore<T> {
         }
         return { kind: 'retry' };
       }
+
       throwIfAborted(signal);
+
       if (deleteFile) {
-        await this.deleteFile(path, signal);
+        await this.deleteBackingFile(path, signal);
       } else {
-        await this.saveFile(path, next, signal);
+        await this.saveBackingFile(path, next, signal);
       }
+
       return { kind: 'success', result };
     } finally {
       await release();
     }
-  }
-
-  private enqueue<R>(task: () => Promise<R>): Promise<R> {
-    const run = this.writeQueue.then(task, task);
-    this.writeQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
   }
 
   private async loadFromFile(
@@ -584,6 +647,7 @@ class JsonFileStore<T> {
     signal?: AbortSignal
   ): Promise<T> {
     throwIfAborted(signal);
+
     const size =
       sizeHint ??
       (await this.fs.getSize(path, this.config.ioTimeoutMs, { signal }));
@@ -595,8 +659,9 @@ class JsonFileStore<T> {
       );
     }
 
-    const raw = await this.fs.read(path, { signal });
+    const raw = await this.fs.readText(path, { signal });
     throwIfAborted(signal);
+
     if (!raw) {
       const emptyParse = this.schema.safeParse([]);
       if (emptyParse.success && emptyParse.data) return emptyParse.data;
@@ -604,6 +669,7 @@ class JsonFileStore<T> {
     }
 
     throwIfAborted(signal);
+
     const parsed: unknown = JSON.parse(raw);
     const result = this.schema.safeParse(parsed);
     if (!result.success || !result.data) {
@@ -612,15 +678,16 @@ class JsonFileStore<T> {
     return result.data;
   }
 
-  private async saveFile(
+  private async saveBackingFile(
     path: string,
     data: T,
     signal?: AbortSignal
   ): Promise<void> {
     const start = nowMs();
     throwIfAborted(signal);
+
     const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}\n`;
-    const renameRetries = await this.fs.writeAtomic(
+    const renameRetries = await this.fs.writeTextAtomic(
       path,
       payload,
       this.config.writeTimeoutMs,
@@ -645,15 +712,20 @@ class JsonFileStore<T> {
     });
   }
 
-  private async deleteFile(path: string, signal?: AbortSignal): Promise<void> {
+  private async deleteBackingFile(
+    path: string,
+    signal?: AbortSignal
+  ): Promise<void> {
     const start = nowMs();
     throwIfAborted(signal);
-    await this.fs.delete(path, this.config.writeTimeoutMs, { signal });
+
+    await this.fs.deleteFile(path, this.config.writeTimeoutMs, { signal });
 
     const emptyResult = this.schema.safeParse([]);
     if (!emptyResult.success || !emptyResult.data) {
       throw new Error('Schema failure on empty state');
     }
+
     this.cache = { data: emptyResult.data, mtimeMs: null };
 
     publishStorageEvent({
@@ -712,6 +784,10 @@ interface NewTodoInput {
   dueAt?: Todo['dueAt'] | undefined;
 }
 
+type IndexLookup =
+  | { kind: 'found'; index: number; todo: Todo; incompleteCount: number }
+  | { kind: 'not_found'; incompleteCount: number };
+
 class TodoRepository {
   constructor(private readonly store: JsonFileStore<Todo[]>) {}
 
@@ -749,38 +825,26 @@ class TodoRepository {
   ): Promise<MatchOutcome | { kind: 'no_updates' }> {
     return this.store.transaction<MatchOutcome | { kind: 'no_updates' }>(
       (todos) => {
-        let index = -1;
-        let current: Todo | undefined;
-        let incompleteCount = 0;
-
-        for (let i = 0; i < todos.length; i++) {
-          const todo = todos[i];
-          if (!todo) continue;
-          if (!todo.completed) incompleteCount += 1;
-          if (todo.id === id) {
-            index = i;
-            current = todo;
-          }
-        }
-
-        if (index === -1 || !current) {
+        const lookup = this.findById(todos, id);
+        if (lookup.kind === 'not_found') {
           return { next: todos, result: this.createNotFound(id) };
         }
 
-        const updates = buildUpdates(current);
+        const updates = buildUpdates(lookup.todo);
 
         if (!updates || Object.keys(updates).length === 0) {
           return { next: todos, result: { kind: 'no_updates' } };
         }
 
-        if (!this.hasChanges(current, updates)) {
-          return { next: todos, result: { kind: 'match', todo: current } };
+        if (!this.hasChanges(lookup.todo, updates)) {
+          return { next: todos, result: { kind: 'match', todo: lookup.todo } };
         }
 
-        const updated = this.applyUpdates(current, updates);
-        const nextTodos = todos.with(index, updated);
-        let nextIncompleteCount = incompleteCount;
-        if (current.completed !== updated.completed) {
+        const updated = this.applyUpdates(lookup.todo, updates);
+        const nextTodos = todos.with(lookup.index, updated);
+
+        let nextIncompleteCount = lookup.incompleteCount;
+        if (lookup.todo.completed !== updated.completed) {
           nextIncompleteCount += updated.completed ? -1 : 1;
         }
 
@@ -827,36 +891,25 @@ class TodoRepository {
     signal?: AbortSignal
   ): Promise<CompleteTodoOutcome> {
     return this.store.transaction<CompleteTodoOutcome>((todos) => {
-      let index = -1;
-      let current: Todo | undefined;
-      let incompleteCount = 0;
-
-      for (let i = 0; i < todos.length; i++) {
-        const todo = todos[i];
-        if (!todo) continue;
-        if (!todo.completed) incompleteCount += 1;
-        if (todo.id === id) {
-          index = i;
-          current = todo;
-        }
-      }
-
-      if (index === -1 || !current) {
+      const lookup = this.findById(todos, id);
+      if (lookup.kind === 'not_found') {
         return { next: todos, result: this.createNotFound(id) };
       }
+
+      const current = lookup.todo;
 
       if (current.completed === completed) {
         return {
           next: todos,
           result: { kind: 'already', todo: current },
-          deleteFile: todos.length > 0 && incompleteCount === 0,
+          deleteFile: todos.length > 0 && lookup.incompleteCount === 0,
         };
       }
 
       const updated = this.applyUpdates(current, { completed });
-      const nextTodos = todos.with(index, updated);
-      let nextIncompleteCount = incompleteCount;
-      nextIncompleteCount += completed ? -1 : 1;
+      const nextTodos = todos.with(lookup.index, updated);
+
+      const nextIncompleteCount = lookup.incompleteCount + (completed ? -1 : 1);
 
       return {
         next: nextTodos,
@@ -870,12 +923,34 @@ class TodoRepository {
     return this.store.close();
   }
 
+  private findById(todos: Todo[], id: string): IndexLookup {
+    let index = -1;
+    let current: Todo | undefined;
+    let incompleteCount = 0;
+
+    for (let i = 0; i < todos.length; i++) {
+      const todo = todos[i];
+      if (!todo) continue;
+
+      if (!todo.completed) incompleteCount += 1;
+      if (todo.id === id) {
+        index = i;
+        current = todo;
+      }
+    }
+
+    return index === -1 || !current
+      ? { kind: 'not_found', incompleteCount }
+      : { kind: 'found', index, todo: current, incompleteCount };
+  }
+
   private createNotFound(id: string): MatchOutcome {
     return {
       kind: 'error',
       response: createErrorResponse(
         'E_NOT_FOUND',
-        `Todo with ID ${id} not found`
+        `Todo with ID ${id} not
+ found`
       ),
     };
   }
@@ -902,13 +977,14 @@ class TodoRepository {
         ? new Date().toISOString()
         : undefined;
     }
+
     return updated;
   }
 }
 
 const config = new EnvStorageConfig();
 const fs = new NodeFileSystem(config);
-const locks = new FileLockManager();
+const locks = new LockFileManager();
 const store = new JsonFileStore<Todo[]>(fs, locks, config, TodosSchema);
 const repository = new TodoRepository(store);
 
