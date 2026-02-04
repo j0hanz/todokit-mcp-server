@@ -288,7 +288,7 @@ export function createServer(): McpServer {
   };
   setInitializationGuard(() => initialized);
 
-  registerAllTools(server);
+  registerAllTools(server, localIcon);
   return server;
 }
 

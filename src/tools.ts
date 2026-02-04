@@ -181,6 +181,7 @@ interface ToolConfig<
   inputSchema: InputArgs;
   outputSchema?: OutputArgs;
   annotations?: ToolAnnotations;
+  icons?: { src: string; mimeType: string; sizes?: string[] }[];
   _meta?: Record<string, unknown>;
 }
 
@@ -418,11 +419,20 @@ async function handleAddTodo(
   }
 }
 
-function registerAddTodo(server: McpServer): void {
+function registerAddTodo(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'add_todo',
-    addTodoToolConfig,
+    {
+      ...addTodoToolConfig,
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
     handleAddTodo
   );
 }
@@ -460,11 +470,20 @@ async function handleAddTodos(
   }
 }
 
-function registerAddTodos(server: McpServer): void {
+function registerAddTodos(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'add_todos',
-    addTodosToolConfig,
+    {
+      ...addTodosToolConfig,
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
     handleAddTodos
   );
 }
@@ -622,7 +641,7 @@ async function handleListTodos(
   });
 }
 
-function registerListTodos(server: McpServer): void {
+function registerListTodos(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'list_todos',
@@ -636,6 +655,13 @@ function registerListTodos(server: McpServer): void {
         readOnlyHint: true,
         idempotentHint: true,
       },
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
     },
     async (filters, extra) => {
       try {
@@ -693,7 +719,7 @@ async function handleUpdateTodo(
   });
 }
 
-function registerUpdateTodo(server: McpServer): void {
+function registerUpdateTodo(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'update_todo',
@@ -706,6 +732,13 @@ function registerUpdateTodo(server: McpServer): void {
         readOnlyHint: false,
         idempotentHint: true,
       },
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
     },
     async (input, extra) => {
       try {
@@ -753,7 +786,7 @@ async function handleCompleteTodo(
   return buildOutcomeResponse(outcome);
 }
 
-function registerCompleteTodo(server: McpServer): void {
+function registerCompleteTodo(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'complete_todo',
@@ -766,6 +799,13 @@ function registerCompleteTodo(server: McpServer): void {
         readOnlyHint: false,
         idempotentHint: true,
       },
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
     },
     async (input, extra) => {
       try {
@@ -807,7 +847,7 @@ async function handleDeleteTodo(
   return buildDeleteResponse(outcome.todo);
 }
 
-function registerDeleteTodo(server: McpServer): void {
+function registerDeleteTodo(server: McpServer, serverIcon?: string): void {
   registerToolWithDiagnostics(
     server,
     'delete_todo',
@@ -821,6 +861,13 @@ function registerDeleteTodo(server: McpServer): void {
         idempotentHint: false,
         destructiveHint: true,
       },
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
     },
     async (input, extra) => {
       try {
@@ -832,7 +879,10 @@ function registerDeleteTodo(server: McpServer): void {
   );
 }
 
-const TOOL_REGISTRATIONS: readonly ((server: McpServer) => void)[] = [
+const TOOL_REGISTRATIONS: readonly ((
+  server: McpServer,
+  serverIcon?: string
+) => void)[] = [
   registerAddTodo,
   registerAddTodos,
   registerListTodos,
@@ -841,8 +891,8 @@ const TOOL_REGISTRATIONS: readonly ((server: McpServer) => void)[] = [
   registerDeleteTodo,
 ];
 
-export function registerAllTools(server: McpServer): void {
+export function registerAllTools(server: McpServer, serverIcon?: string): void {
   TOOL_REGISTRATIONS.forEach((register) => {
-    register(server);
+    register(server, serverIcon);
   });
 }
