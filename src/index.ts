@@ -155,14 +155,43 @@ function loadServerInstructions(): string {
   }
 }
 
+function getLocalIconData(): string | undefined {
+  try {
+    const iconPath = new URL('../assets/logo.svg', import.meta.url);
+    const resolved = fileURLToPath(iconPath);
+    const buffer = readFileSync(resolved);
+    if (buffer.length > 2 * 1024 * 1024) {
+      console.warn(
+        `Warning: Server icon size (${(buffer.length / 1024 / 1024).toFixed(
+          2
+        )}MB) exceeds 2MB limit.`
+      );
+    }
+    return `data:image/svg+xml;base64,${buffer.toString('base64')}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function registerInstructionsResource(
   server: McpServer,
-  isInitialized: () => boolean
+  isInitialized: () => boolean,
+  serverIcon?: string
 ): void {
   server.registerResource(
     'internal://instructions',
     new ResourceTemplate('internal://instructions', { list: undefined }),
-    { title: 'Todokit Instructions', mimeType: 'text/markdown' },
+    {
+      title: 'Todokit Instructions',
+      mimeType: 'text/markdown',
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
     (uri) => {
       if (!isInitialized()) {
         throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
@@ -272,8 +301,20 @@ export function createServer(): McpServer {
   let initialized = false;
   const isInitialized = (): boolean => initialized;
 
+  const localIcon = getLocalIconData();
+
   const server = new McpServer(
-    { name: 'todokit', version: SERVER_VERSION },
+    {
+      name: 'todokit',
+      version: SERVER_VERSION,
+      ...(localIcon
+        ? {
+            icons: [
+              { src: localIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
     {
       instructions: loadServerInstructions(),
       capabilities: {
@@ -284,7 +325,7 @@ export function createServer(): McpServer {
   );
 
   installStrictInitializeHandler(server);
-  registerInstructionsResource(server, isInitialized);
+  registerInstructionsResource(server, isInitialized, localIcon);
 
   const previousInitialized = server.server.oninitialized;
   server.server.oninitialized = () => {
