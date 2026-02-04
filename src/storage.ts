@@ -6,191 +6,41 @@ import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
 import { type Todo, TodosSchema } from './schema.js';
 
-const TRANSIENT_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!isRecord(error)) return undefined;
-  const { code } = error;
-  return typeof code === 'string' ? code : undefined;
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return getErrorCode(error) === 'ENOENT';
-}
-
-function isTransientError(error: unknown): boolean {
-  const code = getErrorCode(error);
-  return code !== undefined && TRANSIENT_ERROR_CODES.has(code);
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
-function createAbortError(message: string): Error {
-  const error = new Error(message);
-  error.name = 'AbortError';
-  return error;
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  message: string
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const error = new Error(message);
-      error.name = 'AbortError';
-      reject(error);
-    }, ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-}
-
-async function getFileMtime(
-  path: string,
-  timeoutMs: number
-): Promise<number | null> {
-  try {
-    const stats = await withTimeout(
-      stat(path),
-      timeoutMs,
-      'File stat timed out'
-    );
-    return stats.mtimeMs;
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    if (isAbortError(error)) throw error;
-    throw error;
-  }
-}
-
 interface FileMetadata {
   mtimeMs: number;
   size: number;
 }
 
-async function getFileMetadataIfExists(
-  path: string,
-  timeoutMs: number
-): Promise<FileMetadata | null> {
-  try {
-    const stats = await withTimeout(
-      stat(path),
-      timeoutMs,
-      'File stat timed out'
-    );
-    return { mtimeMs: stats.mtimeMs, size: stats.size };
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    if (isAbortError(error)) throw error;
-    throw error;
-  }
+interface IFileSystem {
+  read(
+    path: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<string | null>;
+  writeAtomic(
+    path: string,
+    content: string,
+    timeoutMs: number
+  ): Promise<number>;
+  delete(path: string, timeoutMs: number): Promise<void>;
+  getMetadata(path: string, timeoutMs: number): Promise<FileMetadata | null>;
+  getMtime(path: string, timeoutMs: number): Promise<number | null>;
+  getSize(path: string, timeoutMs: number): Promise<number | null>;
+  ensureDir(path: string): Promise<void>;
 }
 
-async function getFileSize(
-  path: string,
-  timeoutMs: number
-): Promise<number | null> {
-  try {
-    const stats = await withTimeout(
-      stat(path),
-      timeoutMs,
-      'File stat timed out'
-    );
-    return stats.size;
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    throw error;
-  }
+interface ILockManager {
+  acquire(path: string, timeoutMs: number): Promise<() => Promise<void>>;
 }
 
-async function readFileIfExists(
-  path: string,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<string | null> {
-  try {
-    return await readFile(path, {
-      encoding: 'utf8',
-      signal: signal ?? AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    if (isAbortError(error)) {
-      if (signal) throw error;
-      throw createAbortError('File read timed out');
-    }
-    throw error;
-  }
+interface IStorageConfig {
+  todoFilePath: string;
+  lockTimeoutMs: number;
+  maxTodoFileBytes: number;
+  jsonIndentation: number;
+  ioTimeoutMs: number;
+  writeTimeoutMs: number;
+  maxConflictRetries: number;
 }
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function tryRename(from: string, to: string): Promise<Error | null> {
-  try {
-    await rename(from, to);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error : new Error(String(error));
-  }
-}
-
-function shouldRetry(error: Error, attempt: number): boolean {
-  return isTransientError(error) && attempt < 2;
-}
-
-async function renameWithRetryCount(from: string, to: string): Promise<number> {
-  let retries = 0;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const error = await tryRename(from, to);
-    if (!error) return retries;
-    if (!shouldRetry(error, attempt)) throw error;
-    retries += 1;
-    await delay(50 * (attempt + 1));
-  }
-  return retries;
-}
-
-async function writeFileAtomic(
-  path: string,
-  contents: string,
-  timeoutMs: number
-): Promise<number> {
-  await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.${randomUUID()}.tmp`;
-
-  try {
-    await writeFile(tempPath, contents, {
-      encoding: 'utf8',
-      flush: true,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    return await renameWithRetryCount(tempPath, path);
-  } finally {
-    await rm(tempPath, { force: true }).catch(() => undefined);
-  }
-}
-
-const DEFAULT_TODO_FILE = resolve(process.cwd(), 'todos.json');
-
-const IO_TIMEOUT_MS = 10_000;
-const WRITE_TIMEOUT_MS = 30_000;
-const LOCK_TIMEOUT_MS = 5_000;
-const DEFAULT_MAX_TODO_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_CONFLICT_RETRIES = 3;
 
 class StorageError extends Error {
   readonly code: string;
@@ -202,361 +52,496 @@ class StorageError extends Error {
   }
 }
 
-function createCodedError(code: string, message: string): StorageError {
-  return new StorageError(code, message);
-}
-
 export function getCodedErrorCode(error: unknown): string | undefined {
   return error instanceof StorageError ? error.code : undefined;
 }
 
-function getEnvInt(name: string): number | null {
-  const raw = process.env[name]?.trim();
-  if (!raw) return null;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
-    return null;
+function createCodedError(code: string, message: string): StorageError {
+  return new StorageError(code, message);
+}
+
+function getSystemErrorCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return (error as { code: string }).code;
   }
-  return value;
+  return undefined;
 }
 
-function getLockTimeoutMs(): number {
-  return getEnvInt('TODOKIT_LOCK_TIMEOUT_MS') ?? LOCK_TIMEOUT_MS;
+function isNotFoundError(error: unknown): boolean {
+  return getSystemErrorCode(error) === 'ENOENT';
 }
 
-function getMaxTodoFileBytes(): number {
-  return (
-    getEnvInt('TODOKIT_MAX_TODO_FILE_BYTES') ?? DEFAULT_MAX_TODO_FILE_BYTES
-  );
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
-function getJsonIndentation(): number {
-  const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
-  if (raw === 'true' || raw === '1' || raw === 'yes') return 2;
-  return 0;
+class EnvStorageConfig implements IStorageConfig {
+  readonly ioTimeoutMs = 10_000;
+  readonly writeTimeoutMs = 30_000;
+  readonly maxConflictRetries = 3;
+
+  get todoFilePath(): string {
+    const override = process.env.TODOKIT_TODO_FILE?.trim();
+    if (override) {
+      const resolved = resolve(override);
+      this.validatePathSafety(resolved);
+      return resolved;
+    }
+    return resolve(process.cwd(), 'todos.json');
+  }
+
+  get lockTimeoutMs(): number {
+    return this.getEnvInt('TODOKIT_LOCK_TIMEOUT_MS') ?? 5_000;
+  }
+
+  get maxTodoFileBytes(): number {
+    return this.getEnvInt('TODOKIT_MAX_TODO_FILE_BYTES') ?? 5 * 1024 * 1024;
+  }
+
+  get jsonIndentation(): number {
+    const raw = process.env.TODOKIT_JSON_PRETTY?.trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes' ? 2 : 0;
+  }
+
+  private getEnvInt(name: string): number | null {
+    const raw = process.env[name]?.trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && Number.isInteger(value) && value >= 0
+      ? value
+      : null;
+  }
+
+  private validatePathSafety(filePath: string): void {
+    const cwd = resolve(process.cwd());
+    const isSafe =
+      this.isPathInside(cwd, filePath) ||
+      !!process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
+
+    if (!isSafe) {
+      throw new Error('Todo file must be within the current working directory');
+    }
+  }
+
+  private isPathInside(baseDir: string, targetPath: string): boolean {
+    const rel = relative(baseDir, targetPath);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  }
 }
 
-interface TodoCache {
-  todos: Todo[];
+class NodeFileSystem implements IFileSystem {
+  constructor(private readonly config: IStorageConfig) {}
+
+  async read(
+    path: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<string | null> {
+    try {
+      return await readFile(path, {
+        encoding: 'utf8',
+        signal: options?.signal ?? AbortSignal.timeout(this.config.ioTimeoutMs),
+      });
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      if (isAbortError(error)) {
+        if (options?.signal) throw error;
+        throw this.createTimeoutError('File read timed out');
+      }
+      throw error;
+    }
+  }
+
+  async writeAtomic(
+    path: string,
+    content: string,
+    timeoutMs: number
+  ): Promise<number> {
+    await this.ensureDir(dirname(path));
+    const tempPath = `${path}.${randomUUID()}.tmp`;
+
+    try {
+      await writeFile(tempPath, content, {
+        encoding: 'utf8',
+        flush: true,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return await this.renameWithRetry(tempPath, path);
+    } finally {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+    }
+  }
+
+  async delete(path: string, timeoutMs: number): Promise<void> {
+    try {
+      await this.withTimeout(
+        rm(path, { force: true }),
+        timeoutMs,
+        'File remove timed out'
+      );
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+  }
+
+  async getMetadata(
+    path: string,
+    timeoutMs: number
+  ): Promise<FileMetadata | null> {
+    try {
+      const stats = await this.withTimeout(
+        stat(path),
+        timeoutMs,
+        'File stat timed out'
+      );
+      return { mtimeMs: stats.mtimeMs, size: stats.size };
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
+    }
+  }
+
+  async getMtime(path: string, timeoutMs: number): Promise<number | null> {
+    const meta = await this.getMetadata(path, timeoutMs);
+    return meta?.mtimeMs ?? null;
+  }
+
+  async getSize(path: string, timeoutMs: number): Promise<number | null> {
+    const meta = await this.getMetadata(path, timeoutMs);
+    return meta?.size ?? null;
+  }
+
+  async ensureDir(path: string): Promise<void> {
+    await mkdir(path, { recursive: true });
+  }
+
+  private async renameWithRetry(from: string, to: string): Promise<number> {
+    let retries = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await rename(from, to);
+        return retries;
+      } catch (error: unknown) {
+        if (!this.shouldRetryRename(error, attempt)) throw error;
+        retries++;
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+    return retries;
+  }
+
+  private shouldRetryRename(error: unknown, attempt: number): boolean {
+    const code = getSystemErrorCode(error);
+    const isTransient = code && ['EBUSY', 'EPERM', 'EACCES'].includes(code);
+    return !!isTransient && attempt < 2;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    message: string
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(this.createTimeoutError(message));
+      }, ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }
+
+  private createTimeoutError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+  }
+}
+
+class FileLockManager implements ILockManager {
+  async acquire(path: string, timeoutMs: number): Promise<() => Promise<void>> {
+    const lockPath = `${path}.lock`;
+    const started = nowMs();
+
+    await mkdir(dirname(path), { recursive: true });
+
+    for (;;) {
+      try {
+        await writeFile(
+          lockPath,
+          `${String(process.pid)} ${new Date().toISOString()}\n`,
+          { encoding: 'utf8', flag: 'wx' }
+        );
+
+        return async () => {
+          await rm(lockPath, { force: true }).catch(() => undefined);
+        };
+      } catch (error: unknown) {
+        if (getSystemErrorCode(error) !== 'EEXIST') {
+          throw error;
+        }
+
+        const elapsedMs = Math.max(0, nowMs() - started);
+        if (elapsedMs >= timeoutMs) {
+          throw createCodedError(
+            'E_STORAGE_LOCK_TIMEOUT',
+            'Todo storage is busy; please retry.'
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+  }
+}
+
+interface CacheEntry<T> {
+  data: T;
   mtimeMs: number | null;
 }
 
-let cache: TodoCache | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
-
-function isPathInside(baseDir: string, targetPath: string): boolean {
-  const rel = relative(baseDir, targetPath);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+interface TransactionStepResult<R> {
+  kind: 'success' | 'retry' | 'fail';
+  result?: R;
+  error?: Error;
 }
 
-function validatePathSafety(filePath: string): void {
-  const cwd = resolve(process.cwd());
-  const target = resolve(filePath);
-  if (!isPathInside(cwd, target) && !process.env.TODOKIT_ALLOW_OUTSIDE_CWD) {
-    throw new Error('Todo file must be within the current working directory');
+class JsonFileStore<T> {
+  private cache: CacheEntry<T> | null = null;
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly fs: IFileSystem,
+    private readonly locks: ILockManager,
+    private readonly config: IStorageConfig,
+    private readonly schema: {
+      safeParse: (data: unknown) => { success: boolean; data?: T };
+    }
+  ) {}
+
+  async read(): Promise<T> {
+    const start = nowMs();
+    await this.writeQueue;
+
+    const path = this.config.todoFilePath;
+    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs);
+    const mtimeMs = metadata?.mtimeMs ?? null;
+
+    if (this.cache?.mtimeMs === mtimeMs) {
+      this.publishReadEvent(start, true, this.getItemCount(this.cache.data));
+      return this.cache.data;
+    }
+
+    const data = await this.loadFromFile(path, metadata?.size);
+    const finalMtimeMs = metadata
+      ? mtimeMs
+      : await this.fs.getMtime(path, this.config.ioTimeoutMs);
+
+    this.cache = { data, mtimeMs: finalMtimeMs };
+
+    this.publishReadEvent(start, false, this.getItemCount(data));
+    return data;
   }
-}
 
-function getTodoFilePath(): string {
-  const override = process.env.TODOKIT_TODO_FILE?.trim();
-  if (override) {
-    const resolved = resolve(override);
-    validatePathSafety(resolved);
-    return resolved;
-  }
-  return DEFAULT_TODO_FILE;
-}
+  async transaction<R>(
+    operation: (current: T) => { next: T; result: R; deleteFile?: boolean }
+  ): Promise<R> {
+    return this.enqueue(async () => {
+      const path = this.config.todoFilePath;
 
-function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(task, task);
-  writeQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
-}
-
-async function acquireWriteLock(
-  todoPath: string,
-  timeoutMs: number
-): Promise<() => Promise<void>> {
-  const lockPath = `${todoPath}.lock`;
-  const started = nowMs();
-
-  await mkdir(dirname(todoPath), { recursive: true });
-
-  for (;;) {
-    try {
-      await writeFile(
-        lockPath,
-        `${String(process.pid)} ${new Date().toISOString()}\n`,
-        { encoding: 'utf8', flag: 'wx' }
-      );
-
-      return async () => {
-        await rm(lockPath, { force: true }).catch(() => undefined);
-      };
-    } catch (error: unknown) {
-      const code = getErrorCode(error);
-      if (code !== 'EEXIST') {
-        throw error;
-      }
-
-      const elapsedMs = Math.max(0, nowMs() - started);
-      if (elapsedMs >= timeoutMs) {
-        throw createCodedError(
-          'E_STORAGE_LOCK_TIMEOUT',
-          'Todo storage is busy; please retry.'
+      for (
+        let attempt = 0;
+        attempt <= this.config.maxConflictRetries;
+        attempt++
+      ) {
+        const step = await this.attemptTransactionStep(
+          path,
+          operation,
+          attempt
         );
+        if (step.kind === 'success') {
+          return step.result as R;
+        }
+        if (step.kind === 'fail') {
+          throw step.error ?? new Error('Transaction failed');
+        }
+        // retry
+        await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
       }
-      await delay(25);
-    }
-  }
-}
 
-async function loadTodos(path: string, sizeHint?: number): Promise<Todo[]> {
-  const size = sizeHint ?? (await getFileSize(path, IO_TIMEOUT_MS));
-  if (size !== null) {
-    const maxBytes = getMaxTodoFileBytes();
-    if (size > maxBytes) {
       throw createCodedError(
-        'E_STORAGE_TOO_LARGE',
-        `Todo storage file is too large (${String(size)} bytes; max ${String(maxBytes)}).`
+        'E_STORAGE_CONFLICT',
+        'Todo storage update failed due to concurrent modifications'
       );
+    });
+  }
+
+  async close(): Promise<void> {
+    const start = nowMs();
+    await this.writeQueue;
+    this.writeQueue = Promise.resolve();
+    this.cache = null;
+
+    publishStorageEvent({
+      v: 1,
+      kind: 'storage',
+      op: 'close',
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, nowMs() - start),
+    });
+  }
+
+  private async attemptTransactionStep<R>(
+    path: string,
+    operation: (current: T) => { next: T; result: R; deleteFile?: boolean },
+    attempt: number
+  ): Promise<TransactionStepResult<R>> {
+    const metadata = await this.fs.getMetadata(path, this.config.ioTimeoutMs);
+    const initialMtimeMs = metadata?.mtimeMs ?? null;
+
+    let current: T;
+    if (this.cache?.mtimeMs === initialMtimeMs) {
+      current = this.cache.data;
+    } else {
+      current = await this.loadFromFile(path, metadata?.size);
     }
-  }
-
-  const raw = await readFileIfExists(path, IO_TIMEOUT_MS);
-  if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  const result = TodosSchema.safeParse(parsed);
-  if (!result.success) {
-    throw new Error('Invalid todo storage format');
-  }
-  return result.data;
-}
-
-async function saveTodos(path: string, todos: Todo[]): Promise<void> {
-  const start = nowMs();
-  const payload = `${JSON.stringify(todos, null, getJsonIndentation())}\n`;
-  const renameRetries = await writeFileAtomic(path, payload, WRITE_TIMEOUT_MS);
-  cache = { todos, mtimeMs: await getFileMtime(path, IO_TIMEOUT_MS) };
-
-  publishStorageEvent({
-    v: 1,
-    kind: 'storage',
-    op: 'write',
-    at: new Date().toISOString(),
-    durationMs: Math.max(0, nowMs() - start),
-    todoCount: todos.length,
-    renameRetries,
-  });
-}
-
-function getCachedTodos(mtimeMs: number | null): Todo[] | null {
-  if (cache?.mtimeMs !== mtimeMs) return null;
-  return cache.todos;
-}
-
-function publishReadEvent(
-  start: number,
-  cacheHit: boolean,
-  todoCount: number
-): void {
-  publishStorageEvent({
-    v: 1,
-    kind: 'storage',
-    op: 'read',
-    at: new Date().toISOString(),
-    durationMs: Math.max(0, nowMs() - start),
-    cacheHit,
-    todoCount,
-  });
-}
-
-async function readTodos(): Promise<readonly Todo[]> {
-  const start = nowMs();
-  await writeQueue;
-  const path = getTodoFilePath();
-  const metadata = await getFileMetadataIfExists(path, IO_TIMEOUT_MS);
-  const mtimeMs = metadata?.mtimeMs ?? null;
-  const cached = getCachedTodos(mtimeMs);
-  if (cached) {
-    publishReadEvent(start, true, cached.length);
-    return cached;
-  }
-  const todos = await loadTodos(path, metadata?.size);
-  const finalMtimeMs = metadata
-    ? mtimeMs
-    : await getFileMtime(path, IO_TIMEOUT_MS);
-  cache = { todos, mtimeMs: finalMtimeMs };
-
-  publishReadEvent(start, false, todos.length);
-  return todos;
-}
-
-async function withTodos<T>(
-  mutate: (todos: Todo[]) => { todos: Todo[]; result: T }
-): Promise<T> {
-  return withTodoFileUpdate((todos) => {
-    const { todos: nextTodos, result } = mutate(todos);
-    if (nextTodos === todos) {
-      return { kind: 'no_change', result };
+    const mtimeMs = metadata
+      ? initialMtimeMs
+      : await this.fs.getMtime(path, this.config.ioTimeoutMs);
+    this.cache = { data: current, mtimeMs };
+    const { next, result, deleteFile } = operation(current);
+    if (next === current && !deleteFile) {
+      return { kind: 'success', result };
     }
-    if (areAllTodosCompleted(nextTodos)) {
-      return { kind: 'delete_file', result };
-    }
-    return { kind: 'save', todos: nextTodos, result };
-  });
-}
-
-function areAllTodosCompleted(todos: readonly Todo[]): boolean {
-  return todos.length > 0 && todos.every((todo) => todo.completed);
-}
-
-type TodoFileUpdate<T> =
-  | { kind: 'no_change'; result: T }
-  | { kind: 'save'; todos: Todo[]; result: T }
-  | { kind: 'delete_file'; result: T };
-
-type NormalizedTodoFileUpdate<T> = Exclude<
-  TodoFileUpdate<T>,
-  { kind: 'no_change' }
->;
-
-function normalizeTodoFileUpdate<T>(
-  outcome: TodoFileUpdate<T>,
-  current: Todo[],
-  hasPersistedFile: boolean
-):
-  | { kind: 'return'; result: T }
-  | { kind: 'proceed'; outcome: NormalizedTodoFileUpdate<T> } {
-  if (outcome.kind === 'save' && areAllTodosCompleted(outcome.todos)) {
-    return {
-      kind: 'proceed',
-      outcome: { kind: 'delete_file', result: outcome.result },
-    };
-  }
-
-  if (outcome.kind !== 'no_change') {
-    return { kind: 'proceed', outcome };
-  }
-
-  if (hasPersistedFile && areAllTodosCompleted(current)) {
-    return {
-      kind: 'proceed',
-      outcome: { kind: 'delete_file', result: outcome.result },
-    };
-  }
-
-  return { kind: 'return', result: outcome.result };
-}
-
-async function deleteTodoFile(path: string): Promise<void> {
-  const start = nowMs();
-
-  await withTimeout(
-    rm(path, { force: true }),
-    WRITE_TIMEOUT_MS,
-    'File remove timed out'
-  ).catch((error: unknown) => {
-    if (isNotFoundError(error)) return;
-    throw error;
-  });
-
-  cache = { todos: [], mtimeMs: null };
-
-  publishStorageEvent({
-    v: 1,
-    kind: 'storage',
-    op: 'write',
-    at: new Date().toISOString(),
-    durationMs: Math.max(0, nowMs() - start),
-    todoCount: 0,
-    renameRetries: 0,
-  });
-}
-
-async function withTodoFileUpdate<T>(
-  work: (todos: Todo[]) => TodoFileUpdate<T>
-): Promise<T> {
-  return enqueueWrite(async () => {
-    const path = getTodoFilePath();
-
-    for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
-      const metadata = await getFileMetadataIfExists(path, IO_TIMEOUT_MS);
-      const initialMtimeMs = metadata?.mtimeMs ?? null;
-      const current =
-        cache?.mtimeMs === initialMtimeMs
-          ? cache.todos
-          : await loadTodos(path, metadata?.size);
-
-      const mtimeMs = metadata
-        ? initialMtimeMs
-        : await getFileMtime(path, IO_TIMEOUT_MS);
-      cache = { todos: current, mtimeMs };
-
-      const normalized = normalizeTodoFileUpdate(
-        work(current),
-        current,
-        mtimeMs !== null
-      );
-      if (normalized.kind === 'return') {
-        return normalized.result;
-      }
-      const { outcome } = normalized;
-
-      const release = await acquireWriteLock(path, getLockTimeoutMs());
-      try {
-        const latestMtime = await getFileMtime(path, IO_TIMEOUT_MS);
-        if (latestMtime !== mtimeMs) {
-          if (attempt >= MAX_CONFLICT_RETRIES) {
-            throw createCodedError(
+    const release = await this.locks.acquire(path, this.config.lockTimeoutMs);
+    try {
+      const latestMtime = await this.fs.getMtime(path, this.config.ioTimeoutMs);
+      if (latestMtime !== mtimeMs) {
+        if (attempt >= this.config.maxConflictRetries) {
+          return {
+            kind: 'fail',
+            error: createCodedError(
               'E_STORAGE_CONFLICT',
               'Todo storage changed during update; please retry.'
-            );
-          }
-          await delay(25 * (attempt + 1));
-          continue;
+            ),
+          };
         }
-
-        if (outcome.kind === 'save') {
-          await saveTodos(path, outcome.todos);
-        } else {
-          await deleteTodoFile(path);
-        }
-
-        return outcome.result;
-      } finally {
-        await release();
+        return { kind: 'retry' };
       }
+      if (deleteFile) {
+        await this.deleteFile(path);
+      } else {
+        await this.saveFile(path, next);
+      }
+      return { kind: 'success', result };
+    } finally {
+      await release();
+    }
+  }
+
+  private enqueue<R>(task: () => Promise<R>): Promise<R> {
+    const run = this.writeQueue.then(task, task);
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  private async loadFromFile(path: string, sizeHint?: number): Promise<T> {
+    const size =
+      sizeHint ?? (await this.fs.getSize(path, this.config.ioTimeoutMs));
+
+    if (size !== null && size > this.config.maxTodoFileBytes) {
+      throw createCodedError(
+        'E_STORAGE_TOO_LARGE',
+        `Todo storage file is too large (${String(size)} bytes; max ${this.config.maxTodoFileBytes}).`
+      );
     }
 
-    throw createCodedError(
-      'E_STORAGE_CONFLICT',
-      'Todo storage update failed due to concurrent modifications'
+    const raw = await this.fs.read(path);
+    if (!raw) {
+      const emptyParse = this.schema.safeParse([]);
+      if (emptyParse.success && emptyParse.data) return emptyParse.data;
+      throw new Error('Schema does not support empty state');
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    const result = this.schema.safeParse(parsed);
+    if (!result.success || !result.data) {
+      throw new Error('Invalid todo storage format');
+    }
+    return result.data;
+  }
+
+  private async saveFile(path: string, data: T): Promise<void> {
+    const start = nowMs();
+    const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}\n`;
+    const renameRetries = await this.fs.writeAtomic(
+      path,
+      payload,
+      this.config.writeTimeoutMs
     );
-  });
+
+    this.cache = {
+      data,
+      mtimeMs: await this.fs.getMtime(path, this.config.ioTimeoutMs),
+    };
+
+    publishStorageEvent({
+      v: 1,
+      kind: 'storage',
+      op: 'write',
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, nowMs() - start),
+      todoCount: this.getItemCount(data),
+      renameRetries,
+    });
+  }
+
+  private async deleteFile(path: string): Promise<void> {
+    const start = nowMs();
+    await this.fs.delete(path, this.config.writeTimeoutMs);
+
+    const emptyResult = this.schema.safeParse([]);
+    if (!emptyResult.success || !emptyResult.data) {
+      throw new Error('Schema failure on empty state');
+    }
+    this.cache = { data: emptyResult.data, mtimeMs: null };
+
+    publishStorageEvent({
+      v: 1,
+      kind: 'storage',
+      op: 'write',
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, nowMs() - start),
+      todoCount: 0,
+      renameRetries: 0,
+    });
+  }
+
+  private getItemCount(data: T): number {
+    return Array.isArray(data) ? data.length : 0;
+  }
+
+  private publishReadEvent(
+    start: number,
+    cacheHit: boolean,
+    count: number
+  ): void {
+    publishStorageEvent({
+      v: 1,
+      kind: 'storage',
+      op: 'read',
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, nowMs() - start),
+      cacheHit,
+      todoCount: count,
+    });
+  }
 }
-
-export async function closeDb(): Promise<void> {
-  const start = nowMs();
-  await writeQueue;
-  writeQueue = Promise.resolve();
-  cache = null;
-
-  publishStorageEvent({
-    v: 1,
-    kind: 'storage',
-    op: 'close',
-    at: new Date().toISOString(),
-    durationMs: Math.max(0, nowMs() - start),
-  });
-}
-
-type MatchOutcome =
-  | { kind: 'match'; todo: Todo }
-  | { kind: 'error'; response: ErrorResponse };
 
 export interface TodoUpdate {
   description?: string;
@@ -566,19 +551,14 @@ export interface TodoUpdate {
   dueAt?: Todo['dueAt'];
 }
 
-function createNotFoundOutcome(id: string): MatchOutcome {
-  return {
-    kind: 'error',
-    response: createErrorResponse(
-      'E_NOT_FOUND',
-      `Todo with ID ${id} not found`
-    ),
-  };
-}
-
 export type CompleteTodoOutcome =
-  | MatchOutcome
+  | { kind: 'match'; todo: Todo }
+  | { kind: 'error'; response: ErrorResponse }
   | { kind: 'already'; todo: Todo };
+
+type MatchOutcome =
+  | { kind: 'match'; todo: Todo }
+  | { kind: 'error'; response: ErrorResponse };
 
 interface NewTodoInput {
   description: string;
@@ -587,155 +567,199 @@ interface NewTodoInput {
   dueAt?: Todo['dueAt'] | undefined;
 }
 
-function hasOwnKey<T extends object>(obj: T, key: PropertyKey): key is keyof T {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
+class TodoRepository {
+  constructor(private readonly store: JsonFileStore<Todo[]>) {}
 
-function valuesEqual(current: unknown, update: unknown): boolean {
-  return Object.is(current, update);
-}
-
-function hasChanges(current: Todo, updates: TodoUpdate): boolean {
-  return Object.entries(updates).some(([key, value]) => {
-    if (!hasOwnKey(current, key)) return true;
-    return !valuesEqual(current[key], value);
-  });
-}
-
-export async function getTodos(): Promise<readonly Todo[]> {
-  return readTodos();
-}
-
-function createNewTodo(item: NewTodoInput, timestamp: string): Todo {
-  return {
-    id: randomUUID(),
-    description: item.description,
-    completed: false,
-    priority: item.priority,
-    category: item.category,
-    dueAt: item.dueAt,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    completedAt: undefined,
-  };
-}
-
-export function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
-  const timestamp = new Date().toISOString();
-  return withTodos((todos) => {
-    const newTodos = items.map((item) => createNewTodo(item, timestamp));
-    return { todos: [...todos, ...newTodos], result: newTodos };
-  });
-}
-
-function calculateUpdatedTodo(current: Todo, updates: TodoUpdate): Todo {
-  const updatedTodo = {
-    ...current,
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if ('completed' in updates && updates.completed !== current.completed) {
-    updatedTodo.completedAt = updates.completed
-      ? new Date().toISOString()
-      : undefined;
+  async getAll(): Promise<readonly Todo[]> {
+    return this.store.read();
   }
-  return updatedTodo;
-}
 
-function applyUpdateToTodos(
-  todos: Todo[],
-  id: string,
-  updates: TodoUpdate
-): { todos: Todo[]; result: Todo | null } {
-  const index = todos.findIndex((todo) => todo.id === id);
-  if (index < 0) {
-    return { todos, result: null };
-  }
-  const current = todos[index];
-  if (!current) {
-    return { todos, result: null };
-  }
-  if (!hasChanges(current, updates)) {
-    return { todos, result: current };
-  }
-  const updatedTodo = calculateUpdatedTodo(current, updates);
-  return { todos: todos.with(index, updatedTodo), result: updatedTodo };
-}
+  async addMany(items: NewTodoInput[]): Promise<Todo[]> {
+    const timestamp = new Date().toISOString();
 
-function buildUpdateOutcome(
-  updated: { todos: Todo[]; result: Todo | null },
-  id: string
-): { todos: Todo[]; result: MatchOutcome } {
-  if (!updated.result) {
+    return this.store.transaction<Todo[]>((todos) => {
+      const newTodos = items.map((item) => ({
+        id: randomUUID(),
+        description: item.description,
+        completed: false,
+        priority: item.priority,
+        category: item.category,
+        dueAt: item.dueAt,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: undefined,
+      }));
+
+      return {
+        next: [...todos, ...newTodos],
+        result: newTodos,
+      };
+    });
+  }
+
+  async update(
+    id: string,
+    buildUpdates: (todo: Todo) => TodoUpdate | null
+  ): Promise<MatchOutcome | { kind: 'no_updates' }> {
+    return this.store.transaction<MatchOutcome | { kind: 'no_updates' }>(
+      (todos) => {
+        const index = todos.findIndex((t) => t.id === id);
+        if (index === -1) {
+          return { next: todos, result: this.createNotFound(id) };
+        }
+
+        const current = todos[index];
+        if (!current) {
+          return { next: todos, result: this.createNotFound(id) };
+        }
+
+        const updates = buildUpdates(current);
+
+        if (!updates || Object.keys(updates).length === 0) {
+          return { next: todos, result: { kind: 'no_updates' } };
+        }
+
+        if (!this.hasChanges(current, updates)) {
+          return { next: todos, result: { kind: 'match', todo: current } };
+        }
+
+        const updated = this.applyUpdates(current, updates);
+        const nextTodos = todos.with(index, updated);
+
+        return {
+          next: nextTodos,
+          result: { kind: 'match', todo: updated },
+          deleteFile: this.shouldDeleteFile(nextTodos),
+        };
+      }
+    );
+  }
+
+  async delete(id: string): Promise<MatchOutcome> {
+    return this.store.transaction<MatchOutcome>((todos) => {
+      const index = todos.findIndex((t) => t.id === id);
+      if (index === -1) {
+        return { next: todos, result: this.createNotFound(id) };
+      }
+
+      const match = todos[index];
+      if (!match) return { next: todos, result: this.createNotFound(id) };
+
+      const nextTodos = todos.filter((t) => t.id !== id);
+
+      return {
+        next: nextTodos,
+        result: { kind: 'match', todo: match },
+        deleteFile: this.shouldDeleteFile(nextTodos),
+      };
+    });
+  }
+
+  async complete(id: string, completed: boolean): Promise<CompleteTodoOutcome> {
+    return this.store.transaction<CompleteTodoOutcome>((todos) => {
+      const index = todos.findIndex((t) => t.id === id);
+      if (index === -1) {
+        return { next: todos, result: this.createNotFound(id) };
+      }
+
+      const current = todos[index];
+      if (!current) return { next: todos, result: this.createNotFound(id) };
+
+      if (current.completed === completed) {
+        return {
+          next: todos,
+          result: { kind: 'already', todo: current },
+          deleteFile: this.shouldDeleteFile(todos),
+        };
+      }
+
+      const updated = this.applyUpdates(current, { completed });
+      const nextTodos = todos.with(index, updated);
+
+      return {
+        next: nextTodos,
+        result: { kind: 'match', todo: updated },
+        deleteFile: this.shouldDeleteFile(nextTodos),
+      };
+    });
+  }
+
+  async close(): Promise<void> {
+    return this.store.close();
+  }
+
+  private createNotFound(id: string): MatchOutcome {
     return {
-      todos: updated.todos,
-      result: createNotFoundOutcome(id),
+      kind: 'error',
+      response: createErrorResponse(
+        'E_NOT_FOUND',
+        `Todo with ID ${id} not found`
+      ),
     };
   }
 
-  return {
-    todos: updated.todos,
-    result: { kind: 'match', todo: updated.result },
-  };
+  private hasChanges(current: Todo, updates: TodoUpdate): boolean {
+    return Object.entries(updates).some(([key, value]) => {
+      if (!Object.prototype.hasOwnProperty.call(current, key)) return true;
+      return !Object.is(
+        (current as unknown as Record<string, unknown>)[key],
+        value
+      );
+    });
+  }
+
+  private applyUpdates(current: Todo, updates: TodoUpdate): Todo {
+    const updated = {
+      ...current,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if ('completed' in updates && updates.completed !== current.completed) {
+      updated.completedAt = updates.completed
+        ? new Date().toISOString()
+        : undefined;
+    }
+    return updated;
+  }
+
+  private shouldDeleteFile(todos: Todo[]): boolean {
+    return todos.length > 0 && todos.every((t) => t.completed);
+  }
 }
 
-type UpdateTodoOutcome = MatchOutcome | { kind: 'no_updates' };
+const config = new EnvStorageConfig();
+const fs = new NodeFileSystem(config);
+const locks = new FileLockManager();
+const store = new JsonFileStore<Todo[]>(fs, locks, config, TodosSchema);
+const repository = new TodoRepository(store);
+
+export async function getTodos(): Promise<readonly Todo[]> {
+  return repository.getAll();
+}
+
+export function addTodos(items: NewTodoInput[]): Promise<Todo[]> {
+  return repository.addMany(items);
+}
 
 export async function updateTodoById(
   id: string,
   buildUpdates: (todo: Todo) => TodoUpdate | null
-): Promise<UpdateTodoOutcome> {
-  return withTodos<UpdateTodoOutcome>((todos) => {
-    const match = todos.find((todo) => todo.id === id);
-    if (!match) {
-      return { todos, result: createNotFoundOutcome(id) };
-    }
-
-    const updates = buildUpdates(match);
-    if (!updates || Object.keys(updates).length === 0) {
-      return { todos, result: { kind: 'no_updates' } };
-    }
-
-    const updated = applyUpdateToTodos(todos, match.id, updates);
-    return buildUpdateOutcome(updated, match.id);
-  });
+): Promise<MatchOutcome | { kind: 'no_updates' }> {
+  return repository.update(id, buildUpdates);
 }
 
 export async function deleteTodoById(id: string): Promise<MatchOutcome> {
-  return withTodos<MatchOutcome>((todos) => {
-    const match = todos.find((todo) => todo.id === id);
-    if (!match) {
-      return { todos, result: createNotFoundOutcome(id) };
-    }
-
-    const remaining = todos.filter((todo) => todo.id !== match.id);
-    if (remaining.length === todos.length) {
-      return {
-        todos,
-        result: createNotFoundOutcome(match.id),
-      };
-    }
-
-    return { todos: remaining, result: { kind: 'match', todo: match } };
-  });
+  return repository.delete(id);
 }
 
 export async function completeTodoById(
   id: string,
   completed: boolean
 ): Promise<CompleteTodoOutcome> {
-  return withTodos<CompleteTodoOutcome>((todos) => {
-    const match = todos.find((todo) => todo.id === id);
-    if (!match) {
-      return { todos, result: createNotFoundOutcome(id) };
-    }
+  return repository.complete(id, completed);
+}
 
-    if (match.completed === completed) {
-      return { todos, result: { kind: 'already', todo: match } };
-    }
-
-    const updated = applyUpdateToTodos(todos, match.id, { completed });
-    return buildUpdateOutcome(updated, match.id);
-  });
+export async function closeDb(): Promise<void> {
+  return repository.close();
 }
