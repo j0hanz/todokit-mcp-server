@@ -59,33 +59,47 @@ export function setInitializationGuard(fn: () => boolean): void {
   isInitialized = fn;
 }
 
-function getToolTimeoutMs(): number | null {
-  const raw = process.env.TODOKIT_TOOL_TIMEOUT_MS?.trim();
-  if (!raw) return DEFAULT_TOOL_TIMEOUT_MS;
-  const value = Number(raw);
+function parseToolTimeoutMs(raw: string | undefined): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return DEFAULT_TOOL_TIMEOUT_MS;
+
+  const value = Number(trimmed);
   if (!Number.isFinite(value) || !Number.isInteger(value)) {
     return DEFAULT_TOOL_TIMEOUT_MS;
   }
+
   if (value <= 0) return null;
   return value;
 }
 
-function isDefined<T>(value: T | null | undefined): value is T {
+function getToolTimeoutMs(): number | null {
+  return parseToolTimeoutMs(process.env.TODOKIT_TOOL_TIMEOUT_MS);
+}
+
+function isNotNullish<T>(value: T | null | undefined): value is T {
   return value !== null && value !== undefined;
+}
+
+interface CancelableRace {
+  promise: Promise<never>;
+  cancel: () => void;
 }
 
 function createAbortPromise(
   signal: AbortSignal | undefined,
   onAbort?: () => void
-): { promise: Promise<never>; cancel: () => void } | null {
+): CancelableRace | null {
   if (!signal) return null;
+
   if (signal.aborted) {
     onAbort?.();
     const error = new Error('Tool cancelled');
     error.name = TOOL_ABORT_ERROR_NAME;
     return { promise: Promise.reject(error), cancel: () => undefined };
   }
+
   let listener: (() => void) | null = null;
+
   const promise = new Promise<never>((_, reject) => {
     listener = () => {
       onAbort?.();
@@ -95,6 +109,7 @@ function createAbortPromise(
     };
     signal.addEventListener('abort', listener, { once: true });
   });
+
   return {
     promise,
     cancel: () => {
@@ -109,8 +124,9 @@ function createTimeoutPromise(
   ms: number,
   message: string,
   onTimeout?: () => void
-): { promise: Promise<never>; cancel: () => void } {
+): CancelableRace {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   const promise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       onTimeout?.();
@@ -119,6 +135,7 @@ function createTimeoutPromise(
       reject(error);
     }, ms);
   });
+
   return {
     promise,
     cancel: () => {
@@ -147,6 +164,14 @@ function mapExecutionError(
   return { code: fallbackCode, message: getErrorMessage(error) };
 }
 
+function createExecutionErrorResponse(
+  error: unknown,
+  fallbackCode: string
+): CallToolResult {
+  const mapped = mapExecutionError(error, fallbackCode);
+  return createErrorResponse(mapped.code, mapped.message);
+}
+
 interface ToolConfig<
   InputArgs extends AnySchema,
   OutputArgs extends AnySchema,
@@ -169,9 +194,12 @@ function extractOutcome(result: CallToolResult): {
 } {
   const structured = result.structuredContent;
   if (!isRecord(structured)) return { ok: true };
+
   const { ok, error } = structured;
   if (ok !== false) return { ok: true };
+
   if (!isRecord(error)) return { ok: false };
+
   const { code } = error;
   return { ok: false, errorCode: typeof code === 'string' ? code : undefined };
 }
@@ -186,6 +214,7 @@ function publishSuccessResult(
 ): void {
   const durationMs = Math.max(0, nowMs() - startedAt);
   const outcome = extractOutcome(resolved);
+
   publishToolResult({
     v: 1,
     kind: 'tool_result',
@@ -218,30 +247,33 @@ function createWrappedHandler<InputArgs extends AnySchema>(
   tool: string,
   handler: ToolCallback<InputArgs>
 ): ToolCallback<InputArgs> {
-  const wrapped = (
+  return ((
     input: ToolInput<InputArgs>,
     extra: RequestHandlerExtra<ServerRequest, ServerNotification>
-  ): Promise<CallToolResult> => {
+  ) => {
     const requestId = randomUUID();
     publishToolCallWithId(tool, input, requestId);
-    const start = nowMs();
+
+    const startedAt = nowMs();
+
     if (!isInitialized()) {
       const response = createErrorResponse(
         'E_NOT_INITIALIZED',
         'Server not initialized'
       );
-      publishSuccessResult(tool, requestId, start, response);
+      publishSuccessResult(tool, requestId, startedAt, response);
       return Promise.resolve(response);
     }
+
     if (extra.signal.aborted) {
       const response = createErrorResponse('E_CANCELLED', 'Tool cancelled');
-      publishSuccessResult(tool, requestId, start, response);
+      publishSuccessResult(tool, requestId, startedAt, response);
       return Promise.resolve(response);
     }
+
     const controller = new AbortController();
     const propagateAbort = (): void => {
-      if (controller.signal.aborted) return;
-      controller.abort();
+      if (!controller.signal.aborted) controller.abort();
     };
 
     let result: CallToolResult | Promise<CallToolResult>;
@@ -250,7 +282,7 @@ function createWrappedHandler<InputArgs extends AnySchema>(
         handler(input, { ...extra, signal: controller.signal })
       );
     } catch (error: unknown) {
-      publishFailureResult(tool, requestId, start);
+      publishFailureResult(tool, requestId, startedAt);
       const rejection =
         error instanceof Error ? error : new Error(String(error));
       return Promise.reject(rejection);
@@ -264,10 +296,12 @@ function createWrappedHandler<InputArgs extends AnySchema>(
           propagateAbort
         )
       : null;
+
     const abort = createAbortPromise(extra.signal, propagateAbort);
+
     const race = Promise.race(
       [Promise.resolve(result), timeout?.promise, abort?.promise].filter(
-        isDefined
+        isNotNullish
       )
     );
 
@@ -277,32 +311,31 @@ function createWrappedHandler<InputArgs extends AnySchema>(
         abort?.cancel();
       })
       .then((resolved) => {
-        publishSuccessResult(tool, requestId, start, resolved);
+        publishSuccessResult(tool, requestId, startedAt, resolved);
         return resolved;
       })
       .catch((error: unknown) => {
         const interruption = classifyInterruption(error);
+
         if (interruption) {
           const code = interruption === 'timeout' ? 'E_TIMEOUT' : 'E_CANCELLED';
           const response = createErrorResponse(
             code,
             error instanceof Error ? error.message : String(error)
           );
-          publishSuccessResult(tool, requestId, start, response);
+          publishSuccessResult(tool, requestId, startedAt, response);
           return response;
         }
-        publishFailureResult(tool, requestId, start);
 
-        const mapped = mapExecutionError(error, 'E_TOOL_ERROR');
-        return createErrorResponse(mapped.code, mapped.message);
+        publishFailureResult(tool, requestId, startedAt);
+        return createExecutionErrorResponse(error, 'E_TOOL_ERROR');
       });
-  };
-  return wrapped as ToolCallback<InputArgs>;
+  }) as unknown as ToolCallback<InputArgs>;
 }
 
 function registerToolWithDiagnostics<
-  OutputArgs extends AnySchema,
   InputArgs extends AnySchema,
+  OutputArgs extends AnySchema,
 >(
   server: McpServer,
   name: string,
@@ -311,6 +344,10 @@ function registerToolWithDiagnostics<
 ): ReturnType<McpServer['registerTool']> {
   return server.registerTool(name, config, createWrappedHandler(name, handler));
 }
+
+// ---------------------------
+// Handler: Add Item
+// ---------------------------
 
 type AddTodoInput = z.infer<typeof AddTodoSchema>;
 
@@ -323,9 +360,7 @@ const ADD_TODOS_ACTIONS = ['list_todos', 'update_todo'] as const;
 
 function requireSingleTodo(todos: Todo[]): Todo {
   const todo = todos[0];
-  if (!todo) {
-    throw new Error('Failed to create todo');
-  }
+  if (!todo) throw new Error('Failed to create todo');
   return todo;
 }
 
@@ -352,7 +387,10 @@ function buildAddTodosResponse(todos: Todo[]): CallToolResult {
   });
 }
 
-const addTodoToolConfig = {
+const addTodoToolConfig: ToolConfig<
+  typeof AddTodoSchema,
+  typeof DefaultOutputSchema
+> = {
   description:
     "Create a new task. Use this for single items. For multiple items, prefer 'add_todos' to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.",
   inputSchema: AddTodoSchema,
@@ -368,15 +406,15 @@ async function handleAddTodo(
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
   const { description, priority, category, dueAt } = input;
+
   try {
     const todos = await addTodos(
       [{ description, priority, category, dueAt }],
       extra.signal
     );
     return buildAddTodoResponse(requireSingleTodo(todos));
-  } catch (err) {
-    const mapped = mapExecutionError(err, 'E_ADD_TODO');
-    return createErrorResponse(mapped.code, mapped.message);
+  } catch (error) {
+    return createExecutionErrorResponse(error, 'E_ADD_TODO');
   }
 }
 
@@ -389,9 +427,16 @@ function registerAddTodo(server: McpServer): void {
   );
 }
 
+// ---------------------------
+// add_todos
+// ---------------------------
+
 type AddTodosInput = z.infer<typeof AddTodosSchema>;
 
-const addTodosToolConfig = {
+const addTodosToolConfig: ToolConfig<
+  typeof AddTodosSchema,
+  typeof DefaultOutputSchema
+> = {
   title: 'Add Todos (Batch)',
   description:
     'Create multiple tasks in one call to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.',
@@ -410,9 +455,8 @@ async function handleAddTodos(
   try {
     const todos = await addTodos(input.items, extra.signal);
     return buildAddTodosResponse(todos);
-  } catch (err) {
-    const mapped = mapExecutionError(err, 'E_ADD_TODOS');
-    return createErrorResponse(mapped.code, mapped.message);
+  } catch (error) {
+    return createExecutionErrorResponse(error, 'E_ADD_TODOS');
   }
 }
 
@@ -425,8 +469,11 @@ function registerAddTodos(server: McpServer): void {
   );
 }
 
-type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
+// ---------------------------
+// list_todos
+// ---------------------------
 
+type ListTodosFilters = z.infer<typeof ListTodosFilterSchema>;
 type ListTodoStatus = 'pending' | 'completed' | 'all';
 
 interface CountSummary {
@@ -439,7 +486,9 @@ function buildSummary(counts: CountSummary): string {
   if (counts.total === 0) {
     return 'No todos found';
   }
-  return `Found ${String(counts.total)} todos (${String(counts.pending)} pending, ${String(counts.completed)} completed)`;
+  return `Found ${String(counts.total)} todos (${String(counts.pending)} pending, ${String(
+    counts.completed
+  )} completed)`;
 }
 
 function resolveStatus(status: ListTodosFilters['status']): ListTodoStatus {
@@ -451,9 +500,13 @@ function buildListHint(status: ListTodoStatus, remaining: number): string {
     return 'Tip: when all todos are completed, the storage file is automatically deleted.';
   }
   if (status === 'all') {
-    return `...and ${String(remaining)} more. Narrow the list by using status='pending' or status='completed', or operate by ID.`;
+    return `...and ${String(
+      remaining
+    )} more. Narrow the list by using status='pending' or status='completed', or operate by ID.`;
   }
-  return `...and ${String(remaining)} more. Use status='all' to include completed items, or operate by ID.`;
+  return `...and ${String(
+    remaining
+  )} more. Use status='all' to include completed items, or operate by ID.`;
 }
 
 function buildListResponse(params: {
@@ -491,6 +544,20 @@ function buildListResponse(params: {
   });
 }
 
+function shouldIncludeTodo(todo: Todo, status: ListTodoStatus): boolean {
+  if (status === 'all') return true;
+  if (status === 'completed') return todo.completed;
+  return !todo.completed;
+}
+
+function countTodo(
+  todo: Todo,
+  counts: { total: number; completed: number }
+): void {
+  counts.total += 1;
+  if (todo.completed) counts.completed += 1;
+}
+
 async function handleListTodos(
   filters: ListTodosFilters,
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>
@@ -501,59 +568,51 @@ async function handleListTodos(
   const limit = 50;
   const items: Todo[] = [];
 
-  let total = 0;
-  let completed = 0;
-  let filteredTotal = 0;
-  let filteredCompleted = 0;
-
-  const shouldInclude = (todo: Todo): boolean => {
-    if (status === 'all') return true;
-    if (status === 'completed') return todo.completed;
-    return !todo.completed;
-  };
+  const totalCounts = { total: 0, completed: 0 };
+  const filteredCounts = { total: 0, completed: 0 };
 
   for (const todo of allTodos) {
-    total += 1;
-    if (todo.completed) completed += 1;
+    countTodo(todo, totalCounts);
 
-    if (shouldInclude(todo)) {
-      filteredTotal += 1;
-      if (todo.completed) filteredCompleted += 1;
+    if (!shouldIncludeTodo(todo, status)) continue;
 
-      if (items.length < limit) {
-        items.push(todo);
-      }
+    countTodo(todo, filteredCounts);
+
+    if (items.length < limit) {
+      items.push(todo);
     }
   }
 
   const counts: CountSummary = {
-    total,
-    completed,
-    pending: total - completed,
+    total: totalCounts.total,
+    completed: totalCounts.completed,
+    pending: totalCounts.total - totalCounts.completed,
   };
 
-  const filteredCounts: CountSummary = {
-    total: filteredTotal,
-    completed: filteredCompleted,
-    pending: filteredTotal - filteredCompleted,
+  const filtered: CountSummary = {
+    total: filteredCounts.total,
+    completed: filteredCounts.completed,
+    pending: filteredCounts.total - filteredCounts.completed,
   };
 
-  const truncated = filteredCounts.total > items.length;
-  const remaining = Math.max(0, filteredCounts.total - items.length);
+  const truncated = filtered.total > items.length;
+  const remaining = Math.max(0, filtered.total - items.length);
 
   let summary: string;
-  if (filteredCounts.total === 0) {
+  if (filtered.total === 0) {
     summary = 'No todos found';
   } else if (truncated) {
-    summary = `Showing ${String(items.length)} of ${String(filteredCounts.total)} ${status} todos (${buildSummary(counts)})`;
+    summary = `Showing ${String(items.length)} of ${String(filtered.total)} ${status} todos (${buildSummary(
+      counts
+    )})`;
   } else {
-    summary = `Showing ${String(filteredCounts.total)} ${status} todos (${buildSummary(counts)})`;
+    summary = `Showing ${String(filtered.total)} ${status} todos (${buildSummary(counts)})`;
   }
 
   return buildListResponse({
     items,
     counts,
-    filteredCounts,
+    filteredCounts: filtered,
     status,
     returned: items.length,
     truncated,
@@ -581,31 +640,28 @@ function registerListTodos(server: McpServer): void {
     async (filters, extra) => {
       try {
         return await handleListTodos(filters, extra);
-      } catch (err) {
-        const mapped = mapExecutionError(err, 'E_LIST_TODOS');
-        return createErrorResponse(mapped.code, mapped.message);
+      } catch (error) {
+        return createExecutionErrorResponse(error, 'E_LIST_TODOS');
       }
     }
   );
 }
+
+// ---------------------------
+// Handler: Update Item
+// ---------------------------
 
 type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 type UpdateFields = TodoUpdate;
 
 function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
   const updates: UpdateFields = {};
-  if (input.description !== undefined) {
-    updates.description = input.description;
-  }
-  if (input.priority !== undefined) {
-    updates.priority = input.priority;
-  }
-  if (input.category !== undefined) {
-    updates.category = input.category;
-  }
-  if (input.dueAt !== undefined) {
-    updates.dueAt = input.dueAt;
-  }
+
+  if (input.description !== undefined) updates.description = input.description;
+  if (input.priority !== undefined) updates.priority = input.priority;
+  if (input.category !== undefined) updates.category = input.category;
+  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
+
   return Object.keys(updates).length > 0 ? updates : null;
 }
 
@@ -618,9 +674,11 @@ async function handleUpdateTodo(
     () => buildUpdatePayload(input),
     extra.signal
   );
+
   if (outcome.kind === 'error') {
     return outcome.response;
   }
+
   if (outcome.kind === 'no_updates') {
     return createErrorResponse('E_BAD_REQUEST', 'No fields provided to update');
   }
@@ -652,13 +710,16 @@ function registerUpdateTodo(server: McpServer): void {
     async (input, extra) => {
       try {
         return await handleUpdateTodo(input, extra);
-      } catch (err) {
-        const mapped = mapExecutionError(err, 'E_UPDATE_TODO');
-        return createErrorResponse(mapped.code, mapped.message);
+      } catch (error) {
+        return createExecutionErrorResponse(error, 'E_UPDATE_TODO');
       }
     }
   );
 }
+
+// ---------------------------
+// Handler: Complete Item
+// ---------------------------
 
 type CompleteTodoInput = z.infer<typeof CompleteTodoSchema>;
 
@@ -674,19 +735,14 @@ function buildStatusResponse(todo: Todo, summary: string): CallToolResult {
 }
 
 function buildCompletionSummary(already: boolean): string {
-  if (already) {
-    return 'Todo is already completed';
-  }
-  return 'Completed todo';
+  return already ? 'Todo is already completed' : 'Completed todo';
 }
 
 function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
-  if (outcome.kind === 'error') {
-    return outcome.response;
-  }
+  if (outcome.kind === 'error') return outcome.response;
+
   const already = outcome.kind === 'already';
-  const summary = buildCompletionSummary(already);
-  return buildStatusResponse(outcome.todo, summary);
+  return buildStatusResponse(outcome.todo, buildCompletionSummary(already));
 }
 
 async function handleCompleteTodo(
@@ -714,13 +770,16 @@ function registerCompleteTodo(server: McpServer): void {
     async (input, extra) => {
       try {
         return await handleCompleteTodo(input, extra);
-      } catch (err) {
-        const mapped = mapExecutionError(err, 'E_COMPLETE_TODO');
-        return createErrorResponse(mapped.code, mapped.message);
+      } catch (error) {
+        return createExecutionErrorResponse(error, 'E_COMPLETE_TODO');
       }
     }
   );
 }
+
+// ---------------------------
+// Handler: Delete Item
+// ---------------------------
 
 type DeleteTodoInput = z.infer<typeof DeleteTodoSchema>;
 
@@ -740,9 +799,11 @@ async function handleDeleteTodo(
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
   const outcome = await deleteTodoById(input.id, extra.signal);
+
   if (outcome.kind === 'error') {
     return outcome.response;
   }
+
   return buildDeleteResponse(outcome.todo);
 }
 
@@ -764,15 +825,14 @@ function registerDeleteTodo(server: McpServer): void {
     async (input, extra) => {
       try {
         return await handleDeleteTodo(input, extra);
-      } catch (err) {
-        const mapped = mapExecutionError(err, 'E_DELETE_TODO');
-        return createErrorResponse(mapped.code, mapped.message);
+      } catch (error) {
+        return createExecutionErrorResponse(error, 'E_DELETE_TODO');
       }
     }
   );
 }
 
-const TOOL_REGISTRATIONS: ((server: McpServer) => void)[] = [
+const TOOL_REGISTRATIONS: readonly ((server: McpServer) => void)[] = [
   registerAddTodo,
   registerAddTodos,
   registerListTodos,
