@@ -4,62 +4,67 @@
 
 ## 1) Project Context
 
-- **Domain:** Model Context Protocol (MCP) server for Todokit task management.
+- **Domain:** MCP Server for Todokit (Task management).
 - **Tech Stack (Verified):**
-  - **Languages:** TypeScript 5.9.x, Node.js >= 20.0.0 (`package.json`).
-  - **Frameworks:** `@modelcontextprotocol/sdk` (`package.json`).
-  - **Key Libraries:** `zod` (validation), `tsx` (execution), `eslint`/`prettier` (style).
-- **Architecture:** Modularized MCP server (Handlers in `tools.ts`, Logic in `storage.ts`, Types in `schema.ts`).
+  - **Languages:** TypeScript 5.x (`package.json`, `tsconfig.json`).
+  - **Frameworks:** Node.js >=22.19.8 (`package.json`), MCP SDK (`@modelcontextprotocol/sdk`).
+  - **Key Libraries:** `zod` (validation), `tsx` (runtime/testing), `eslint` (linting).
+- **Architecture:** MCP Server (Service). Modular structure (`tools.ts`, `storage.ts`, `schema.ts`). Entry point `src/index.ts`.
 
 ## 2) Repository Map (High-Level)
 
-- `src/`: Source code (Typescript).
-- `tests/`: Test files (`*.test.ts`).
-- `.github/`: CI/CD workflows and prompt context.
-  > Ignore `dist/`, `node_modules/`, `coverage/`.
+- `src/`: Source code (TypeScript).
+- `tests/`: Integration and Unit tests.
+- `scripts/`: Custom build and test automation scripts (`tasks.mjs`).
+- `assets/`: Static assets (instructions, etc.).
+- `.github/workflows/`: CI/CD configurations.
+  > Ignore generated/vendor dirs like `dist/`, `node_modules/`.
 
 ## 3) Operational Commands (Verified)
 
-- **Environment:** Node.js >= 20.
-- **Install:** `npm ci`
-- **Dev:** `npm run dev` (Runs `tsx watch src/index.ts`)
-- **Test:** `npm run test` (Runs `node --test tests/*.test.ts`)
-- **Build:** `npm run build` (Clean + tsc + copy assets)
-- **Lint/Format:** `npm run lint` / `npm run format`
+- **Environment:** Node.js >= 22.19.8 (`engines` in `package.json`).
+- **Install:** `npm install`
+- **Dev:** `npm run dev` (TypeScript watch) or `npm run dev:run` (Node watch).
+- **Test:** `npm test` (Runs `node --test` via `scripts/tasks.mjs`).
+- **Build:** `npm run build` (Full pipeline: clean, compile, validate, copy assets).
+- **Lint/Format:** `npm run lint`, `npm run format` (Prettier).
+- **Type-Check:** `npm run type-check`.
 
 ## 4) Coding Standards (Style & Patterns)
 
 - **Naming:**
-  - **Types/Schemas:** PascalCase (e.g., `AddTodoSchema`, `Todo`).
-  - **Functions/Vars:** camelCase (e.g., `handleAddTodo`).
-  - **Constants:** SCREAMING_SNAKE_CASE (e.g., `DEFAULT_TOOL_TIMEOUT_MS`).
+  - Source: CamelCase (`requestContext.ts`) or lowercase single words (`storage.ts`).
+  - Tests: Kebab-case (`cli.test.ts`) or snake_case (`runtime_helpers.test.ts`).
 - **Structure:**
-  - Tool definitions and handlers live in `src/tools.ts`.
-  - Data models and Zod schemas live in `src/schema.ts`.
-  - Persistence logic lives in `src/storage.ts`.
-- **Typing/Strictness:** strict mode enabled (`"strict": true`, `"noUncheckedIndexedAccess": true`).
+  - `src/` contains core business logic and MCP definitions.
+  - `scripts/tasks.mjs` acts as the single source of truth for build/test tasks.
+- **Typing/Strictness:** Strict TypeScript (`strict: true`, `noUncheckedIndexedAccess: true` in `tsconfig.json`).
 - **Patterns Observed:**
-  - **Tool Registration:** Use `registerToolWithDiagnostics` wrapper for error handling/tracing.
-  - **Response Helpers:** Use `createToolResponse` / `createErrorResponse` (from `src/responses.ts`).
-  - **Validation:** Extensive use of `zod` for input/output validation.
+  - Custom task runner pattern in `scripts/tasks.mjs`.
+  - Node.js native test runner (`node --test`) used with `tsx` loader.
+  - Zod used for schema validation (inferred from deps).
 
 ## 5) Agent Behavioral Rules (Do Nots)
 
-- Do not introduce new dependencies without explicit instruction (use `npm install`).
-- Do not modify `package-lock.json` manually.
-- Do not bypass Zod schema definitions; ensure all inputs/outputs match strict schemas.
-- Do not remove `npm run type-check` or `npm run lint` steps from the workflow.
-- Do not use `console.log` for production logging; use the diagnostics/logging utilities.
+- Do not introduce new dependencies without updating `package.json` and `package-lock.json`.
+- Do not edit `dist/` directly; it is a build artifact.
+- Do not bypass `scripts/tasks.mjs` when adding new build/test steps; update the script instead.
+- Do not commit secrets or `.env` files.
+- Do not disable `eslint` rules without explicit reason.
 
 ## 6) Testing Strategy (Verified)
 
-- **Framework:** Node.js native test runner (`node:test`) with `tsx`.
-- **Where tests live:** `tests/*.test.ts`.
+- **Framework:** Node.js native test runner (`node --test`) with `tsx`.
+- **Where tests live:** `tests/` and `src/__tests__/`.
 - **Approach:**
-  - Tests run directly against TypeScript source using `tsx` loader.
-  - Coverage available via `npm run test:coverage`.
+  - Unit and Integration tests.
+  - Tests run via `scripts/tasks.mjs` which handles loaders (`tsx`).
 
-## 7) Evolution Rules
+## 7) Common Pitfalls (Optional; Verified Only)
+
+- **Build Failures:** Ensure `scripts/tasks.mjs` is used for build operations (`npm run build`) as it handles asset copying and validation which `tsc` alone does not.
+
+## 8) Evolution Rules
 
 - If conventions change, include an `AGENTS.md` update in the same PR.
 - If a command is corrected after failures, record the final verified command here.
