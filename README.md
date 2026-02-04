@@ -1,277 +1,110 @@
-# todokit-mcp
+# Todokit-MCP
 
-<img src="assets/logo.svg" alt="Todokit MCP Server Logo" width="150">
+<img src="assets/logo.svg" alt="Todokit MCP Server Logo" width="200">
 
-An MCP server for Todokit, a task management and productivity tool with JSON storage.
+![npm version](https://img.shields.io/npm/v/@j0hanz/todokit-mcp) ![License](https://img.shields.io/npm/l/@j0hanz/todokit-mcp) ![Node](https://img.shields.io/node/v/@j0hanz/todokit-mcp)
 
-[![npm version](https://img.shields.io/npm/v/@j0hanz/todokit-mcp.svg)](https://www.npmjs.com/package/@j0hanz/todokit-mcp)
-[![License](https://img.shields.io/npm/l/@j0hanz/todokit-mcp)](LICENSE)
-[![Node.js](https://img.shields.io/node/v/@j0hanz/todokit-mcp)](package.json)
-
-## One-Click Install
-
-[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=todokit&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Ftodokit-mcp%40latest%22%5D%7D)[![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=todokit&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Ftodokit-mcp%40latest%22%5D%7D&quality=insiders)
+[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=todokit&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Ftodokit-mcp%40latest%22%5D%7D) [![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=todokit&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Ftodokit-mcp%40latest%22%5D%7D&quality=insiders)
 
 [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=todokit&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovdG9kb2tpdC1tY3BAbGF0ZXN0Il19)
 
-## Features
+An MCP server for Todokit, a task management and productivity tool with JSON storage.
 
-- Task management: add, update, complete, and delete todos.
-- Batch operations: add multiple todos at once.
-- Safe listing: status-based filtering with a default of pending-only and truncation to keep responses small.
-- JSON persistence with queued writes and atomic file writes.
-- Optional diagnostics events (tool calls/results, storage, lifecycle) via Node diagnostics channels.
+## Overview
 
-## Quick Start
+Todokit MCP provides a lightweight, local task management system that integrates directly with your AI coding assistant. It uses a simple JSON file for persistence, allowing you to create, track, and complete tasks without leaving your editor. The server automatically handles file safety, locking, and atomic writes.
+
+## Key Features
+
+- **Local Persistence**: Stores tasks in a human-readable `todos.json` file in your working directory.
+- **Task Management**: Create, update, complete, and delete tasks with priorities and categories.
+- **Batch Operations**: Add multiple tasks efficiently in a single operation.
+- **Filtering**: List tasks by status (pending/completed) to keep context manageable.
+- **Safety Controls**: Validates file paths to prevent traversal outside the working directory (unless configured).
+- **Diagnostics**: emitting events for tool calls, storage operations, and lifecycle events.
+
+## Tech Stack
+
+- **Runtime**: Node.js >=22.19.8
+- **Language**: TypeScript 5.9
+- **SDK**: Model Context Protocol SDK (`@modelcontextprotocol/sdk`)
+- **Libraries**: Zod (validation)
+
+## Repository Structure
+
+```text
+c:\todokit-mcp
+├── dist/            # Compiled output
+├── scripts/         # Build and task scripts
+├── src/
+│   ├── index.ts     # Server entrypoint & startup
+│   ├── schema.ts    # Zod schemas for tools & types
+│   ├── storage.ts   # JSON file persistence layer
+│   └── tools.ts     # Tool registration & handlers
+├── package.json
+└── README.md
+```
+
+## Requirements
+
+- Node.js >=22.19.8
+
+## Quickstart
+
+### NPX (Recommended)
 
 ```bash
 npx -y @j0hanz/todokit-mcp@latest
-```
-
-The server runs over stdio (no HTTP endpoint) and registers MCP tools on startup.
-
-## Installation
-
-### NPX (recommended)
-
-```bash
-npx -y @j0hanz/todokit-mcp@latest
-```
-
-### Global install
-
-```bash
-npm install -g @j0hanz/todokit-mcp
-```
-
-Then run:
-
-```bash
-todokit-mcp
-```
-
-### From source
-
-```bash
-git clone https://github.com/j0hanz/todokit-mcp-server.git
-cd todokit-mcp-server
-npm install
-npm run build
-npm start
 ```
 
 ## Configuration
 
-### Storage path
-
-By default, todos are stored in `todos.json` in the current working directory. To control where data is written, set the `TODOKIT_TODO_FILE` environment variable to an absolute or relative path ending with `.json`. Relative paths resolve from the current working directory. The directory is created as needed; if the file does not exist, the server starts with an empty list.
-
-When all todos are completed, the server removes the storage file so it does not linger on disk.
-
-Examples:
-
-```bash
-# macOS/Linux
-TODOKIT_TODO_FILE=/path/to/todos.json npx -y @j0hanz/todokit-mcp@latest
-```
-
-```powershell
-# Windows PowerShell
-$env:TODOKIT_TODO_FILE = 'C:\path\to\todos.json'
-npx -y @j0hanz/todokit-mcp@latest
-```
-
-### JSON formatting
-
-By default, todos are written as pretty-printed JSON (2-space indentation). To write compact JSON instead, set `TODOKIT_JSON_PRETTY` to `0` or `false`.
-
-```bash
-TODOKIT_JSON_PRETTY=0 npx -y @j0hanz/todokit-mcp@latest
-```
-
-### CLI options
-
-The server accepts a few CLI flags (use `--` to forward args when running via `npx`).
-
-```bash
-npx -y @j0hanz/todokit-mcp@latest -- --todo-file ./todos.json --diagnostics --log-level debug
-```
-
-| Flag            | Alias | Description                                                                |
-| :-------------- | :---- | :------------------------------------------------------------------------- |
-| `--todo-file`   | `-f`  | Override the todo storage path (same as `TODOKIT_TODO_FILE`).              |
-| `--diagnostics` | `-d`  | Enable diagnostics output (JSON lines) to stderr.                          |
-| `--log-level`   | `-l`  | Diagnostics log level: `error`, `warn`, `info`, `debug` (default: `info`). |
-
-The log level is only used when diagnostics output is enabled.
-
-### Diagnostics
-
-Diagnostics events are always published on Node's `diagnostics_channel` and can be subscribed to programmatically. When `--diagnostics` is set, the server attaches default subscribers and prints JSON events to **stderr** (stdout stays reserved for MCP traffic).
-
-Channels:
-
-- `todokit:tool` — tool call + tool result events
-- `todokit:storage` — read/write/close events
-- `todokit:lifecycle` — shutdown events
-
-## Tools
-
-All tools return a JSON payload in both `content` (stringified) and `structuredContent`.
-Inputs are validated with strict Zod schemas, so unknown fields are rejected.
-
-Success payload:
-
-```json
-{
-  "ok": true,
-  "result": {}
-}
-```
-
-Error payload:
-
-```json
-{
-  "ok": false,
-  "error": { "code": "E_CODE", "message": "Details" }
-}
-```
-
-The `result` shape is tool-specific.
-
-### add_todo
-
-Create a new todo item.
-
-| Parameter   | Type   | Required | Description                                                           |
-| :---------- | :----- | :------- | :-------------------------------------------------------------------- |
-| description | string | Yes      | Description of the todo (1-2000 chars)                                |
-| priority    | string | Yes      | Priority: `low`, `medium`, `high`                                     |
-| category    | string | Yes      | Category: `work`, `bug`, `testing`, `docs`                            |
-| dueAt       | string | No       | Optional due date/time as an ISO 8601 timestamp with offset (RFC3339) |
-
-Result fields:
-
-- `item` (todo)
-- `summary`
-- `nextActions`
-
-### add_todos
-
-Add multiple todo items in one call.
-
-Parameters:
-
-- `items` (array, required): Array of todo objects (1-50 items). Each item supports `description`, `priority`, `category`, `dueAt`.
-
-Result fields:
-
-- `items` (todos)
-- `summary`
-- `nextActions`
-
-### list_todos
-
-List todos with an optional status filter.
-
-| Parameter | Type   | Required | Default | Description                               |
-| :-------- | :----- | :------- | :------ | :---------------------------------------- |
-| status    | string | No       | pending | Filter by status: pending, completed, all |
-
-Notes:
-
-- Results may be truncated for safety (currently returns up to 50 items). Use `status: "pending"` (default) or `status: "completed"` to narrow the response.
-
-Result fields:
-
-- `items` (todos)
-- `summary`
-- `counts` (`total`, `pending`, `completed`) — global counts across all todos
-- `filteredCounts` (`total`, `pending`, `completed`) — counts within the requested status filter
-- `status` (the effective status filter)
-- `returned`, `truncated`, `remaining`, `hint`
-
-### update_todo
-
-Update fields on a todo item.
-
-| Parameter   | Type   | Required | Description                                    |
-| :---------- | :----- | :------- | :--------------------------------------------- |
-| id          | string | Yes      | The ID of the todo to update                   |
-| description | string | No       | New description (1-2000 chars)                 |
-| priority    | string | No       | New priority: `low`, `medium`, `high`          |
-| category    | string | No       | New category: `work`, `bug`, `testing`, `docs` |
-| dueAt       | string | No       | Replace due date/time (ISO 8601 with offset)   |
-
-Notes:
-
-- If no updatable fields are provided, the tool returns an error.
-
-Result fields:
-
-- `item` (todo)
-- `summary`
-- `nextActions`
-
-### complete_todo
-
-Mark a todo as completed.
-
-| Parameter | Type   | Required | Description        |
-| :-------- | :----- | :------- | :----------------- |
-| id        | string | Yes      | The ID of the todo |
-
-Result fields:
-
-- `item` (todo)
-- `summary`
-- `nextActions`
-
-### delete_todo
-
-Delete a todo item by ID.
-
-| Parameter | Type   | Required | Description                  |
-| :-------- | :----- | :------- | :--------------------------- |
-| id        | string | Yes      | The ID of the todo to delete |
-
-Result fields:
-
-- `deletedIds` (array)
-- `summary`
-- `nextActions`
-
-## Data Model
-
-A todo item has the following shape:
-
-```json
-{
-  "id": "string",
-  "description": "string",
-  "completed": false,
-  "priority": "low|medium|high",
-  "category": "work|bug|testing|docs",
-  "dueAt": "ISO timestamp with offset?",
-  "createdAt": "ISO timestamp with offset",
-  "updatedAt": "ISO timestamp with offset?",
-  "completedAt": "ISO timestamp with offset?"
-}
-```
-
-Notes:
-
-- `createdAt`, `updatedAt`, and `completedAt` are ISO 8601 timestamps with offset (e.g., `2025-02-28T10:30:00Z`).
-- `dueAt` uses the same ISO 8601 timestamp format with an explicit offset.
-- When tools report an ambiguous match (error code `E_AMBIGUOUS`), prefer using an exact `id` from the provided candidates.
-
-## Client Configuration
+The server can be configured via CLI arguments or environment variables.
+
+### CLI Arguments
+
+| Flag            | Short | Description                                                        |
+| --------------- | ----- | ------------------------------------------------------------------ |
+| `--todo-file`   | `-f`  | Path to the todo JSON file.                                        |
+| `--diagnostics` | `-d`  | Enable diagnostic logging to stderr.                               |
+| `--log-level`   | `-l`  | Set log level (`error`, `warn`, `info`, `debug`). Default: `info`. |
+
+### Environment Variables
+
+| Variable                      | Description                                                     | Default               |
+| ----------------------------- | --------------------------------------------------------------- | --------------------- |
+| `TODOKIT_TODO_FILE`           | Absolute or relative path to the todo storage file.             | `todos.json` (in CWD) |
+| `TODOKIT_JSON_PRETTY`         | Set to `true` or `1` to indent JSON files with 2 spaces.        | `false` (compact)     |
+| `TODOKIT_TOOL_TIMEOUT_MS`     | Timeout for tool execution in milliseconds.                     | `60000`               |
+| `TODOKIT_LOCK_TIMEOUT_MS`     | Timeout for acquiring file lock.                                | `5000`                |
+| `TODOKIT_MAX_TODO_FILE_BYTES` | Maximum allowed size of the todo file.                          | `5242880` (5MB)       |
+| `TODOKIT_ALLOW_OUTSIDE_CWD`   | Allow storage file to be outside the current working directory. | `false`               |
+
+## MCP Surface
+
+### Tools
+
+| Tool            | Description                         | Parameters                                                                                        | Results                                            |
+| --------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `add_todo`      | Create a new task.                  | `description` (str, req), `priority` (enum, req), `category` (enum, req), `dueAt` (iso-date, opt) | Returns the created item and summary.              |
+| `add_todos`     | Create multiple tasks in batch.     | `items` (array of todos, req, max 50)                                                             | Returns count and IDs of created items.            |
+| `list_todos`    | List tasks with optional filtering. | `status` (pending/completed/all, opt, def: pending)                                               | Returns list of items, counts, and status summary. |
+| `update_todo`   | Update an existing task.            | `id` (str, req), `description`, `priority`, `category`, `dueAt` (all opt)                         | Returns updated item.                              |
+| `complete_todo` | Mark a task as completed.           | `id` (str, req)                                                                                   | Returns updated item.                              |
+| `delete_todo`   | Permanently remove a task.          | `id` (str, req)                                                                                   | Returns summary of deletion.                       |
+
+### Resources
+
+| URI Template              | Type            | Description                                                       |
+| ------------------------- | --------------- | ----------------------------------------------------------------- |
+| `internal://instructions` | `text/markdown` | Returns usage instructions and context about the Todokit manager. |
+
+## Client Configuration Examples
 
 <details>
 <summary><b>VS Code</b></summary>
 
-Add this to your `mcpServers` configuration in `settings.json`:
+Add to your `settings.json` (Code) or `mcpServers` configuration:
 
 ```json
 {
@@ -287,7 +120,7 @@ Add this to your `mcpServers` configuration in `settings.json`:
 <details>
 <summary><b>Claude Desktop</b></summary>
 
-Add this to your `claude_desktop_config.json`:
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -305,7 +138,7 @@ Add this to your `claude_desktop_config.json`:
 <details>
 <summary><b>Cursor</b></summary>
 
-1. Go to **Cursor Settings** > **Features** > **MCP**
+1. Open **Cursor Settings** > **Features** > **MCP**
 2. Click **+ Add New MCP Server**
 3. Name: `todokit`
 4. Type: `command`
@@ -313,54 +146,35 @@ Add this to your `claude_desktop_config.json`:
 
 </details>
 
-## Development
+## Security
 
-### Prerequisites
+- **Path Traversal**: By default, the server enforces that the `todos.json` file must reside within the current working directory. You must explicitly opt-in via `TODOKIT_ALLOW_OUTSIDE_CWD` to store files elsewhere.
+- **File Limits**: The server enforces a maximum file size (default 5MB) to prevent disk exhaustion.
 
-- Node.js >= 20.0.0
+## Development Workflow
 
-### Scripts
+1. **Install Dependencies**
 
-| Command               | Description                                           |
-| :-------------------- | :---------------------------------------------------- |
-| npm run build         | Compile TypeScript to JavaScript                      |
-| npm run dev           | Run server in watch mode for development              |
-| npm start             | Run the built server                                  |
-| npm run test          | Run unit tests (node --test + tsx)                    |
-| npm run test:coverage | Run unit tests with coverage                          |
-| npm run lint          | Run ESLint                                            |
-| npm run format        | Format with Prettier                                  |
-| npm run format:check  | Check formatting with Prettier                        |
-| npm run type-check    | Run TypeScript type checking                          |
-| npm run dup-check     | Run duplicate code checks (jscpd)                     |
-| npm run clean         | Remove the dist/ build output                         |
-| npm run inspector     | Launch the MCP inspector (pass server cmd after `--`) |
+   ```bash
+   npm install
+   ```
 
-### Manual verification
+2. **Common Scripts**
 
-```bash
-npm run build
-npm run inspector -- node dist/index.js
-```
+   | Script              | Description                               |
+   | ------------------- | ----------------------------------------- |
+   | `npm run build`     | Builds the project to `dist/`.            |
+   | `npm run dev`       | Watches for changes and recompiles.       |
+   | `npm run test`      | Runs the test suite via Node test runner. |
+   | `npm run lint`      | Lints code with ESLint.                   |
+   | `npm run format`    | Formats code with Prettier.               |
+   | `npm run inspector` | Launches the MCP inspector for debugging. |
 
-### Project structure
+## Troubleshooting
 
-```text
-src/
-  index.ts       # MCP server entrypoint (stdio)
-  tools.ts       # Tool registrations and handlers
-  schema.ts      # Zod input/output schemas
-  storage.ts     # JSON persistence and CRUD
-  responses.ts   # Tool response builders
-  diagnostics.ts # Node diagnostics channels
-tests/           # Unit tests
-docs/            # Assets (logo)
-```
-
-## Contributing
-
-Contributions are welcome. Please run `npm run format`, `npm run lint`, `npm run type-check`, `npm run build`, `npm test`, `npm run test:coverage`, and `npm run dup-check` before opening a PR.
+- **Server Error: Server not initialized**: This typically happens if tools are called before the server has fully started. Ensure the client waits for initialization.
+- **Storage Error: path outside CWD**: You are trying to use a file outside the workspace. Move the file or set `TODOKIT_ALLOW_OUTSIDE_CWD=1`.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT
