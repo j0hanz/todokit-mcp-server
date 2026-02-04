@@ -1,6 +1,6 @@
 # todokit-mcp
 
-<img src="docs/logo.png" alt="Todokit MCP Server Logo" width="150">
+<img src="assets/logo.svg" alt="Todokit MCP Server Logo" width="150">
 
 An MCP server for Todokit, a task management and productivity tool with JSON storage.
 

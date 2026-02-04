@@ -53,6 +53,9 @@ coverage/
 
 # Local reports
 .jscpd/
-report/
-scripts/
+reports/
 metrics/
+scripts/*
+!scripts/build.mjs
+!scripts/validate-fetch.mjs
+!scripts/tasks.mjs
