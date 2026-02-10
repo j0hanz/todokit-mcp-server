@@ -6,6 +6,10 @@ import { createErrorResponse, getErrorMessage } from '../src/responses.js';
 describe('errors', () => {
   it('extracts error messages from common shapes', () => {
     assert.equal(getErrorMessage(new Error('boom')), 'boom');
+    assert.equal(
+      getErrorMessage(new Error('\u001b[31mboom\u001b[39m')),
+      'boom'
+    );
     assert.equal(getErrorMessage('string error'), 'string error');
     assert.equal(getErrorMessage({ message: 'object error' }), 'object error');
     assert.equal(getErrorMessage({}), 'Unknown error');

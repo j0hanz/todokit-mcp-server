@@ -5,7 +5,9 @@ export interface RequestContext {
   tool: string;
 }
 
-const requestContextStorage = new AsyncLocalStorage<RequestContext>();
+const requestContextStorage = new AsyncLocalStorage<RequestContext>({
+  name: 'todokit.requestContext',
+});
 
 export function runWithRequestContext<T>(
   context: RequestContext,

@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { Buffer } from 'node:buffer';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   mkdir,
   readFile,
@@ -9,7 +9,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { TOOL_ABORT_ERROR_NAME } from './constants.js';
 import { nowMs, publishStorageEvent } from './diagnostics.js';
@@ -109,8 +109,22 @@ function isNotFoundError(error: unknown): boolean {
   return getSystemErrorCode(error) === 'ENOENT';
 }
 
+function isMissingPathError(error: unknown): boolean {
+  const code = getSystemErrorCode(error);
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function isSameText(expected: string, actual: string): boolean {
+  const expectedBuffer = Buffer.from(expected);
+  const actualBuffer = Buffer.from(actual);
+  return (
+    expectedBuffer.length === actualBuffer.length &&
+    timingSafeEqual(expectedBuffer, actualBuffer)
+  );
 }
 
 function createToolCancelledError(): Error {
@@ -196,16 +210,7 @@ class EnvStorageConfig implements StorageConfig {
 
   private async validatePathSafety(filePath: string): Promise<void> {
     const cwd = resolve(process.cwd());
-
-    let targetPath = filePath;
-    // SECURITY: Resolve symlinks to prevent traversal ([AUDIT-SEC-01])
-    if (existsSync(filePath)) {
-      try {
-        targetPath = await realpath(filePath);
-      } catch {
-        // If realpath fails (e.g. permission), assume unsafe or fall back to strict check
-      }
-    }
+    const targetPath = await this.resolveValidatedPath(filePath);
 
     const isSafe =
       this.isPathInside(cwd, targetPath) ||
@@ -218,7 +223,35 @@ class EnvStorageConfig implements StorageConfig {
 
   private isPathInside(baseDir: string, targetPath: string): boolean {
     const rel = relative(baseDir, targetPath);
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+    const isParentTraversal = rel === '..' || rel.startsWith(`..${sep}`);
+    return rel === '' || (!isParentTraversal && !isAbsolute(rel));
+  }
+
+  private async resolveValidatedPath(filePath: string): Promise<string> {
+    const resolved = resolve(filePath);
+    let probe = resolved;
+
+    for (;;) {
+      try {
+        const realProbe = await realpath(probe);
+        if (probe === resolved) {
+          return realProbe;
+        }
+
+        const suffix = relative(probe, resolved);
+        return resolve(realProbe, suffix);
+      } catch (error) {
+        if (!isMissingPathError(error)) {
+          throw error;
+        }
+
+        const parent = dirname(probe);
+        if (parent === probe) {
+          return resolved;
+        }
+        probe = parent;
+      }
+    }
   }
 }
 
@@ -298,7 +331,7 @@ class NodeFileSystem implements FileSystemPort {
       );
       return { mtimeMs: stats.mtimeMs, size: stats.size };
     } catch (error) {
-      if (isNotFoundError(error)) return null;
+      if (isMissingPathError(error)) return null;
       throw error;
     }
   }
@@ -420,6 +453,7 @@ class LockFileManager implements LockPort {
   ): Promise<() => Promise<void>> {
     const lockPath = `${path}.lock`;
     const started = nowMs();
+    const lockContent = `${String(process.pid)} ${new Date().toISOString()} ${randomUUID()}\n`;
 
     await mkdir(dirname(path), { recursive: true });
 
@@ -427,14 +461,21 @@ class LockFileManager implements LockPort {
       throwIfAborted(signal);
 
       try {
-        await writeFile(
-          lockPath,
-          `${String(process.pid)} ${new Date().toISOString()}\n`,
-          { encoding: 'utf8', flag: 'wx' }
-        );
+        await writeFile(lockPath, lockContent, {
+          encoding: 'utf8',
+          flag: 'wx',
+        });
 
         return async () => {
-          await rm(lockPath, { force: true }).catch(() => undefined);
+          try {
+            const currentContent = await readFile(lockPath, {
+              encoding: 'utf8',
+            });
+            if (!isSameText(lockContent, currentContent)) return;
+            await rm(lockPath, { force: true });
+          } catch {
+            // Lock cleanup errors must not mask tool results.
+          }
         };
       } catch (error: unknown) {
         if (getSystemErrorCode(error) !== 'EEXIST') {
@@ -677,6 +718,14 @@ class JsonFileStore<T> {
       throw new Error('Schema does not support empty state');
     }
 
+    const rawBytes = Buffer.byteLength(raw, 'utf8');
+    if (rawBytes > this.config.maxTodoFileBytes) {
+      throw createCodedError(
+        'E_STORAGE_TOO_LARGE',
+        `Todo storage file is too large (${String(rawBytes)} bytes; max ${this.config.maxTodoFileBytes}).`
+      );
+    }
+
     throwIfAborted(signal);
 
     const parsed: unknown = JSON.parse(raw);
@@ -696,6 +745,14 @@ class JsonFileStore<T> {
     throwIfAborted(signal);
 
     const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}\n`;
+    const payloadBytes = Buffer.byteLength(payload, 'utf8');
+    if (payloadBytes > this.config.maxTodoFileBytes) {
+      throw createCodedError(
+        'E_STORAGE_TOO_LARGE',
+        `Todo storage file is too large (${String(payloadBytes)} bytes; max ${this.config.maxTodoFileBytes}).`
+      );
+    }
+
     const renameRetries = await this.fs.writeTextAtomic(
       path,
       payload,

@@ -47,6 +47,9 @@ export interface LifecycleEvent {
   event: 'shutdown';
   at: string;
   signal?: string | undefined;
+  pid?: number | undefined;
+  uptimeSec?: number | undefined;
+  activeResources?: string[] | undefined;
 }
 
 const toolDiagnosticsChannel: Channel = channel('todokit:tool');

@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export interface ErrorResponse {
@@ -17,7 +19,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeMessage(message: unknown): string | undefined {
   if (typeof message !== 'string' || message.length === 0) return undefined;
-  return message;
+  const sanitized = stripVTControlCharacters(message);
+  return sanitized.length > 0 ? sanitized : undefined;
 }
 
 export function getErrorMessage(error: unknown): string {

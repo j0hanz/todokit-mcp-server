@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { findPackageJSON } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -140,36 +142,73 @@ const SERVER_VERSION =
 
 const DEFAULT_INSTRUCTIONS = 'Todokit to-do list manager';
 
-function resolveInstructionsPath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), 'instructions.md');
+function resolvePackageRoot(): string {
+  try {
+    const packageJsonPath = findPackageJSON(import.meta.url);
+    if (packageJsonPath) {
+      return dirname(packageJsonPath);
+    }
+  } catch {
+    // Fall back to path-based resolution.
+  }
+
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+function resolveInstructionsPathCandidates(): string[] {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const packageRoot = resolvePackageRoot();
+
+  return [
+    resolve(moduleDir, 'instructions.md'),
+    resolve(packageRoot, 'dist', 'instructions.md'),
+    resolve(packageRoot, 'src', 'instructions.md'),
+  ];
 }
 
 function loadServerInstructions(): string {
-  try {
-    const raw = readFileSync(resolveInstructionsPath(), { encoding: 'utf8' });
-    const trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : DEFAULT_INSTRUCTIONS;
-  } catch {
-    return DEFAULT_INSTRUCTIONS;
+  for (const instructionsPath of resolveInstructionsPathCandidates()) {
+    try {
+      const raw = readFileSync(instructionsPath, { encoding: 'utf8' });
+      const trimmed = raw.trim();
+      return trimmed.length > 0 ? trimmed : DEFAULT_INSTRUCTIONS;
+    } catch {
+      // Continue trying candidates.
+    }
   }
+
+  return DEFAULT_INSTRUCTIONS;
+}
+
+function resolveIconPathCandidates(): string[] {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const packageRoot = resolvePackageRoot();
+
+  return [
+    resolve(moduleDir, 'assets', 'logo.svg'),
+    resolve(packageRoot, 'assets', 'logo.svg'),
+    resolve(packageRoot, 'dist', 'assets', 'logo.svg'),
+  ];
 }
 
 function getLocalIconData(): string | undefined {
-  try {
-    const iconPath = new URL('../assets/logo.svg', import.meta.url);
-    const resolved = fileURLToPath(iconPath);
-    const buffer = readFileSync(resolved);
-    if (buffer.length > 2 * 1024 * 1024) {
-      console.warn(
-        `Warning: Server icon size (${(buffer.length / 1024 / 1024).toFixed(
-          2
-        )}MB) exceeds 2MB limit.`
-      );
+  for (const iconPath of resolveIconPathCandidates()) {
+    try {
+      const buffer = readFileSync(iconPath);
+      if (buffer.length > 2 * 1024 * 1024) {
+        console.warn(
+          `Warning: Server icon size (${(buffer.length / 1024 / 1024).toFixed(
+            2
+          )}MB) exceeds 2MB limit.`
+        );
+      }
+      return `data:image/svg+xml;base64,${buffer.toString('base64')}`;
+    } catch {
+      // Continue trying candidates.
     }
-    return `data:image/svg+xml;base64,${buffer.toString('base64')}`;
-  } catch {
-    return undefined;
   }
+
+  return undefined;
 }
 
 function registerInstructionsResource(
@@ -360,10 +399,10 @@ export async function closeServerSafely(
 
   try {
     await server.close();
-    process.exit(0);
+    process.exitCode = 0;
   } catch (error: unknown) {
     console.error(`Shutdown error (${signal}):`, error);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
@@ -371,12 +410,16 @@ export async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
 
+  const activeResources = process.getActiveResourcesInfo().slice(0, 25);
   publishLifecycleEvent({
     v: 1,
     kind: 'lifecycle',
     event: 'shutdown',
     at: new Date().toISOString(),
     signal,
+    pid: process.pid,
+    uptimeSec: process.uptime(),
+    activeResources,
   });
 
   await closeDbSafely();

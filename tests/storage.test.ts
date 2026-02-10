@@ -151,6 +151,40 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     }
   });
 
+  it('rejects writes that exceed max todo file bytes', async () => {
+    const todoFile = process.env.TODOKIT_TODO_FILE;
+    assert.ok(todoFile);
+
+    const previous = process.env.TODOKIT_MAX_TODO_FILE_BYTES;
+    process.env.TODOKIT_MAX_TODO_FILE_BYTES = '32';
+
+    try {
+      await assert.rejects(
+        () =>
+          addTodos([
+            {
+              description: 'x'.repeat(120),
+              priority: DEFAULT_PRIORITY,
+              category: DEFAULT_CATEGORY,
+            },
+          ]),
+        (error: unknown) =>
+          error instanceof Error &&
+          (error as unknown as { code?: unknown }).code ===
+            'E_STORAGE_TOO_LARGE'
+      );
+
+      const persisted = await readTextIfExists(todoFile);
+      assert.equal(persisted, null);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TODOKIT_MAX_TODO_FILE_BYTES;
+      } else {
+        process.env.TODOKIT_MAX_TODO_FILE_BYTES = previous;
+      }
+    }
+  });
+
   it('rejects cross-drive todo paths when outside cwd is disallowed', async () => {
     if (process.platform !== 'win32') return;
     const root = parse(process.cwd()).root;
@@ -211,6 +245,61 @@ describe('storage', { timeout: TEST_TIMEOUT_MS }, () => {
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
       await rm(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked parent directories outside cwd when the todo file does not exist', async (t) => {
+    delete process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
+
+    const outsideDir = await mkdtemp(join(tmpdir(), 'todokit-secret-dir-'));
+    const localDir = resolve('dist/tests/temp-storage-dir-link');
+    await mkdir(localDir, { recursive: true });
+
+    const linkDir = join(localDir, 'outside-link');
+    try {
+      await symlink(
+        outsideDir,
+        linkDir,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+    } catch (e) {
+      await rm(outsideDir, { recursive: true, force: true });
+      await rm(localDir, { recursive: true, force: true });
+
+      if ((e as { code?: string }).code === 'EPERM') {
+        t.skip('Skipping symlink directory test due to Windows EPERM');
+        return;
+      }
+      throw e;
+    }
+
+    process.env.TODOKIT_TODO_FILE = join(linkDir, 'todos.json');
+
+    try {
+      await assert.rejects(
+        () => getTodos(),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes('within the current working directory')
+      );
+    } finally {
+      await rm(localDir, { recursive: true, force: true });
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows todo paths inside cwd when folder name starts with dot-dot', async () => {
+    delete process.env.TODOKIT_ALLOW_OUTSIDE_CWD;
+
+    const trickyDir = resolve('..safe-todos');
+    process.env.TODOKIT_TODO_FILE = join(trickyDir, 'todos.json');
+
+    try {
+      await mkdir(trickyDir, { recursive: true });
+      const todos = await getTodos();
+      assert.equal(todos.length, 0);
+    } finally {
+      await rm(trickyDir, { recursive: true, force: true });
     }
   });
 
