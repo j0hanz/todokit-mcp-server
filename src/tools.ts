@@ -98,83 +98,6 @@ function getToolTimeoutMs(): number | null {
   return parseToolTimeoutMs(process.env.TODOKIT_TOOL_TIMEOUT_MS);
 }
 
-function isNotNullish<T>(value: T | null | undefined): value is T {
-  return value !== null && value !== undefined;
-}
-
-interface CancelableRace {
-  promise: Promise<never>;
-  cancel: () => void;
-}
-
-function createAbortPromise(
-  signal: AbortSignal | undefined,
-  onAbort?: () => void
-): CancelableRace | null {
-  if (!signal) return null;
-
-  if (signal.aborted) {
-    onAbort?.();
-    const error = new Error('Tool cancelled');
-    error.name = TOOL_ABORT_ERROR_NAME;
-    return { promise: Promise.reject(error), cancel: () => undefined };
-  }
-
-  let listener: (() => void) | null = null;
-
-  const promise = new Promise<never>((_, reject) => {
-    listener = () => {
-      onAbort?.();
-      const error = new Error('Tool cancelled');
-      error.name = TOOL_ABORT_ERROR_NAME;
-      reject(error);
-    };
-    signal.addEventListener('abort', listener, { once: true });
-  });
-
-  return {
-    promise,
-    cancel: () => {
-      if (listener) {
-        signal.removeEventListener('abort', listener);
-      }
-    },
-  };
-}
-
-function createTimeoutPromise(
-  ms: number,
-  message: string,
-  onTimeout?: () => void
-): CancelableRace {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const promise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      onTimeout?.();
-      const error = new Error(message);
-      error.name = TOOL_TIMEOUT_ERROR_NAME;
-      reject(error);
-    }, ms);
-  });
-
-  return {
-    promise,
-    cancel: () => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-    },
-  };
-}
-
-function classifyInterruption(error: unknown): 'cancelled' | 'timeout' | null {
-  if (!(error instanceof Error)) return null;
-  if (error.name === TOOL_ABORT_ERROR_NAME) return 'cancelled';
-  if (error.name === TOOL_TIMEOUT_ERROR_NAME) return 'timeout';
-  return null;
-}
-
 function mapExecutionError(
   error: unknown,
   fallbackCode: string
@@ -322,37 +245,65 @@ function createWrappedHandler<InputArgs extends AnySchema>(
       return Promise.resolve(response);
     }
 
+    // Optimization: Inline promise creation to avoid helper closures
     const timeoutMs = getToolTimeoutMs();
-    const timeout = timeoutMs
-      ? createTimeoutPromise(
-          timeoutMs,
-          `Tool ${tool} timed out`,
-          propagateAbort
-        )
-      : null;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    const abort = createAbortPromise(extra.signal, propagateAbort);
+    const promises: Promise<CallToolResult>[] = [Promise.resolve(result)];
+    const cleanups: (() => void)[] = [];
 
-    const race = Promise.race(
-      [Promise.resolve(result), timeout?.promise, abort?.promise].filter(
-        isNotNullish
-      )
+    if (timeoutMs) {
+      promises.push(
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            propagateAbort();
+            const error = new Error(`Tool ${tool} timed out`);
+            error.name = TOOL_TIMEOUT_ERROR_NAME;
+            reject(error);
+          }, timeoutMs);
+        })
+      );
+      cleanups.push(() => {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      });
+    }
+
+    promises.push(
+      new Promise<never>((_, reject) => {
+        const listener = (): void => {
+          propagateAbort();
+          const error = new Error('Tool cancelled');
+          error.name = TOOL_ABORT_ERROR_NAME;
+          reject(error);
+        };
+        if (extra.signal.aborted) {
+          listener();
+        } else {
+          extra.signal.addEventListener('abort', listener, { once: true });
+          cleanups.push(() => {
+            extra.signal.removeEventListener('abort', listener);
+          });
+        }
+      })
     );
 
-    return race
+    return Promise.race(promises)
       .finally(() => {
-        timeout?.cancel();
-        abort?.cancel();
+        for (const cleanup of cleanups) cleanup();
       })
       .then((resolved) => {
         publishSuccessResult(tool, requestId, startedAt, resolved);
         return resolved;
       })
       .catch((error: unknown) => {
-        const interruption = classifyInterruption(error);
+        // Inlined classification
+        let code = 'E_TOOL_ERROR';
+        if (error instanceof Error) {
+          if (error.name === TOOL_TIMEOUT_ERROR_NAME) code = 'E_TIMEOUT';
+          else if (error.name === TOOL_ABORT_ERROR_NAME) code = 'E_CANCELLED';
+        }
 
-        if (interruption) {
-          const code = interruption === 'timeout' ? 'E_TIMEOUT' : 'E_CANCELLED';
+        if (code !== 'E_TOOL_ERROR') {
           const response = createErrorResponse(code, getErrorMessage(error));
           publishSuccessResult(tool, requestId, startedAt, response);
           return response;
@@ -687,12 +638,76 @@ function shouldIncludeTodo(todo: Todo, status: ListTodoStatus): boolean {
   return !todo.completed;
 }
 
-function countTodo(
-  todo: Todo,
-  counts: { total: number; completed: number }
-): void {
-  counts.total += 1;
-  if (todo.completed) counts.completed += 1;
+function calculateTodoMetrics(
+  todos: readonly Todo[],
+  status: ListTodoStatus
+): {
+  totalTotal: number;
+  totalCompleted: number;
+  filteredTotal: number;
+  filteredCompleted: number;
+} {
+  let totalTotal = 0;
+  let totalCompleted = 0;
+  let filteredTotal = 0;
+  let filteredCompleted = 0;
+
+  for (const todo of todos) {
+    totalTotal++;
+    if (todo.completed) totalCompleted++;
+
+    if (shouldIncludeTodo(todo, status)) {
+      filteredTotal++;
+      if (todo.completed) filteredCompleted++;
+    }
+  }
+
+  return { totalTotal, totalCompleted, filteredTotal, filteredCompleted };
+}
+
+function collectPagedTodos(
+  todos: readonly Todo[],
+  status: ListTodoStatus,
+  offset: number,
+  limit: number
+): Todo[] {
+  const items: Todo[] = [];
+  let skipped = 0;
+  let collected = 0;
+
+  for (const todo of todos) {
+    if (collected >= limit) break;
+
+    if (shouldIncludeTodo(todo, status)) {
+      if (skipped < offset) {
+        skipped++;
+      } else {
+        items.push(todo);
+        collected++;
+      }
+    }
+  }
+  return items;
+}
+
+function filterAndSliceTodos(
+  todos: readonly Todo[],
+  status: ListTodoStatus,
+  offset: number,
+  limit: number
+): { items: Todo[]; filteredTotal: number } {
+  const items: Todo[] = [];
+  let filteredTotal = 0;
+
+  for (const todo of todos) {
+    if (shouldIncludeTodo(todo, status)) {
+      if (filteredTotal >= offset && items.length < limit) {
+        items.push(todo);
+      }
+      filteredTotal++;
+    }
+  }
+  return { items, filteredTotal };
 }
 
 type ListOffsetResolution =
@@ -777,42 +792,34 @@ async function handleListTodos(
   const status = resolveStatus(filters.status);
   const limit = resolvePageLimit(filters.limit);
 
-  const totalCounts = { total: 0, completed: 0 };
-  for (const todo of allTodos) {
-    countTodo(todo, totalCounts);
-  }
+  // Optimization: Single pass for stats and filtering via helper
+  const { totalTotal, totalCompleted, filteredTotal, filteredCompleted } =
+    calculateTodoMetrics(allTodos, status);
 
-  const filteredTodos = allTodos.filter((todo) =>
-    shouldIncludeTodo(todo, status)
-  );
-  const filteredCounts = { total: filteredTodos.length, completed: 0 };
-  for (const todo of filteredTodos) {
-    if (todo.completed) filteredCounts.completed += 1;
-  }
-
-  const counts: CountSummary = {
-    total: totalCounts.total,
-    completed: totalCounts.completed,
-    pending: totalCounts.total - totalCounts.completed,
-  };
-
-  const filtered: CountSummary = {
-    total: filteredCounts.total,
-    completed: filteredCounts.completed,
-    pending: filteredCounts.total - filteredCounts.completed,
-  };
-
-  const resolvedOffset = resolveListOffset(
-    filters,
-    status,
-    filteredTodos.length
-  );
+  const resolvedOffset = resolveListOffset(filters, status, filteredTotal);
   if (!resolvedOffset.ok) {
     return resolvedOffset.response;
   }
   const { offset } = resolvedOffset;
 
-  const items = filteredTodos.slice(offset, offset + limit);
+  // Pass 2: Collect Items (only if needed)
+  let items: Todo[] = [];
+  if (filteredTotal > 0 && offset < filteredTotal) {
+    items = collectPagedTodos(allTodos, status, offset, limit);
+  }
+
+  const counts: CountSummary = {
+    total: totalTotal,
+    completed: totalCompleted,
+    pending: totalTotal - totalCompleted,
+  };
+
+  const filtered: CountSummary = {
+    total: filteredTotal,
+    completed: filteredCompleted,
+    pending: filteredTotal - filteredCompleted,
+  };
+
   const nextOffset = offset + items.length;
   const hasMore = nextOffset < filtered.total;
   const remaining = Math.max(0, filtered.total - nextOffset);
@@ -1146,22 +1153,27 @@ async function handleSearchTodos(
     }
   }
 
-  const matches = (await searchTodos(query, extra.signal)).filter((todo) =>
-    shouldIncludeTodo(todo, status)
+  const allMatches = await searchTodos(query, extra.signal);
+
+  // Optimization: Single pass for filtering and slicing.
+  const offset = cursor?.offset ?? 0;
+  const { items, filteredTotal } = filterAndSliceTodos(
+    allMatches,
+    status,
+    offset,
+    limit
   );
 
-  const offset = cursor?.offset ?? 0;
-  if (offset > 0 && offset >= matches.length) {
+  if (offset > 0 && offset >= filteredTotal) {
     return createErrorResponse(
       'E_INVALID_PARAMS',
       'Pagination cursor is out of range. Restart search without a cursor.'
     );
   }
 
-  const items = matches.slice(offset, offset + limit);
   const nextOffset = offset + items.length;
-  const hasMore = nextOffset < matches.length;
-  const remaining = Math.max(0, matches.length - nextOffset);
+  const hasMore = nextOffset < filteredTotal;
+  const remaining = Math.max(0, filteredTotal - nextOffset);
   const nextCursor = hasMore
     ? encodeCursor({
         v: CURSOR_VERSION,
@@ -1172,7 +1184,7 @@ async function handleSearchTodos(
       })
     : undefined;
 
-  if (matches.length === 0) {
+  if (filteredTotal === 0) {
     return createToolResponse({
       ok: true,
       result: {
@@ -1192,8 +1204,8 @@ async function handleSearchTodos(
 
   const summary =
     offset > 0 || hasMore
-      ? `Showing ${String(offset + 1)}-${String(offset + items.length)} of ${String(matches.length)} matches for "${query}" (${status})`
-      : `Found ${matches.length} matches for "${query}" (${status})`;
+      ? `Showing ${String(offset + 1)}-${String(offset + items.length)} of ${String(filteredTotal)} matches for "${query}" (${status})`
+      : `Found ${filteredTotal} matches for "${query}" (${status})`;
 
   return createToolResponse({
     ok: true,
@@ -1203,7 +1215,7 @@ async function handleSearchTodos(
       status,
       summary,
       returned: items.length,
-      totalMatches: matches.length,
+      totalMatches: filteredTotal,
       remaining,
       limit,
       hasMore,
