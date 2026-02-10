@@ -23,7 +23,7 @@ import {
   enableDefaultDiagnosticsSubscribers,
   publishLifecycleEvent,
 } from './diagnostics.js';
-import { closeDb } from './storage.js';
+import { closeDb, getTodos } from './storage.js';
 import { registerAllTools, setInitializationGuard } from './tools.js';
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
@@ -209,6 +209,45 @@ function registerInstructionsResource(
   );
 }
 
+function registerTodoResource(
+  server: McpServer,
+  isInitialized: () => boolean,
+  serverIcon?: string
+): void {
+  server.registerResource(
+    'todo://list',
+    new ResourceTemplate('todo://list', { list: undefined }),
+    {
+      title: 'Active Todos',
+      description: 'A live list of all active (pending) todos.',
+      mimeType: 'application/json',
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
+    async (uri) => {
+      if (!isInitialized()) {
+        throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
+      }
+      const todos = await getTodos();
+      const active = todos.filter((t) => !t.completed);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text: JSON.stringify(active, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
+      };
+    }
+  );
+}
+
 function installStrictInitializeHandler(server: McpServer): void {
   type InitializeHandler = (
     request: InitializeRequest
@@ -275,6 +314,7 @@ export function createServer(): McpServer {
 
   installStrictInitializeHandler(server);
   registerInstructionsResource(server, isInitialized, localIcon);
+  registerTodoResource(server, isInitialized, localIcon);
 
   const previousInitialized = server.server.oninitialized;
   server.server.oninitialized = () => {

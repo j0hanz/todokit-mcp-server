@@ -37,6 +37,7 @@ import {
   DefaultOutputSchema,
   DeleteTodoSchema,
   ListTodosFilterSchema,
+  SearchTodosSchema,
   type Todo,
   UpdateTodoSchema,
 } from './schema.js';
@@ -47,6 +48,7 @@ import {
   deleteTodoById,
   getCodedErrorCode,
   getTodos,
+  searchTodos,
   type TodoUpdate,
   updateTodoById,
 } from './storage.js';
@@ -879,6 +881,71 @@ function registerDeleteTodo(server: McpServer, serverIcon?: string): void {
   );
 }
 
+// ---------------------------
+// Handler: Search Item
+// ---------------------------
+
+type SearchTodosInput = z.infer<typeof SearchTodosSchema>;
+
+async function handleSearchTodos(
+  input: SearchTodosInput,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+): Promise<CallToolResult> {
+  const { query } = input;
+  const todos = await searchTodos(query, extra.signal);
+
+  if (todos.length === 0) {
+    return createToolResponse({
+      ok: true,
+      result: {
+        items: [],
+        summary: `No todos found matching "${query}"`,
+        nextActions: ['list_todos', 'add_todo'],
+      },
+    });
+  }
+
+  return createToolResponse({
+    ok: true,
+    result: {
+      items: todos,
+      summary: `Found ${todos.length} matches for "${query}"`,
+      nextActions: ['update_todo', 'complete_todo'],
+    },
+  });
+}
+
+function registerSearchTodos(server: McpServer, serverIcon?: string): void {
+  registerToolWithDiagnostics(
+    server,
+    'search_todos',
+    {
+      title: 'Search Todos',
+      description: 'Search for todos by description or category.',
+      inputSchema: SearchTodosSchema,
+      outputSchema: DefaultOutputSchema,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+      ...(serverIcon
+        ? {
+            icons: [
+              { src: serverIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+            ],
+          }
+        : {}),
+    },
+    async (input, extra) => {
+      try {
+        return await handleSearchTodos(input, extra);
+      } catch (error) {
+        return createExecutionErrorResponse(error, 'E_SEARCH_TODOS');
+      }
+    }
+  );
+}
+
 const TOOL_REGISTRATIONS: readonly ((
   server: McpServer,
   serverIcon?: string
@@ -889,6 +956,7 @@ const TOOL_REGISTRATIONS: readonly ((
   registerUpdateTodo,
   registerCompleteTodo,
   registerDeleteTodo,
+  registerSearchTodos,
 ];
 
 export function registerAllTools(server: McpServer, serverIcon?: string): void {

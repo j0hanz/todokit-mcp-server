@@ -84,20 +84,22 @@ The server can be configured via CLI arguments or environment variables.
 
 ### Tools
 
-| Tool            | Description                         | Parameters                                                                                        | Results                                            |
-| --------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `add_todo`      | Create a new task.                  | `description` (str, req), `priority` (enum, req), `category` (enum, req), `dueAt` (iso-date, opt) | Returns the created item and summary.              |
-| `add_todos`     | Create multiple tasks in batch.     | `items` (array of todos, req, max 50)                                                             | Returns count and IDs of created items.            |
-| `list_todos`    | List tasks with optional filtering. | `status` (pending/completed/all, opt, def: pending)                                               | Returns list of items, counts, and status summary. |
-| `update_todo`   | Update an existing task.            | `id` (str, req), `description`, `priority`, `category`, `dueAt` (all opt)                         | Returns updated item.                              |
-| `complete_todo` | Mark a task as completed.           | `id` (str, req)                                                                                   | Returns updated item.                              |
-| `delete_todo`   | Permanently remove a task.          | `id` (str, req)                                                                                   | Returns summary of deletion.                       |
+| Tool            | Description                         | Parameters                                                                                       | Results                                            |
+| --------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `add_todo`      | Create a new task.                  | `description` (str, req), `priority` (enum, req), `category` (str, req), `dueAt` (iso-date, opt) | Returns the created item and summary.              |
+| `add_todos`     | Create multiple tasks in batch.     | `items` (array of todos, req, max 50)                                                            | Returns count and IDs of created items.            |
+| `list_todos`    | List tasks with optional filtering. | `status` (pending/completed/all, opt, def: pending)                                              | Returns list of items, counts, and status summary. |
+| `search_todos`  | Search for tasks.                   | `query` (str, req)                                                                               | Returns matching items.                            |
+| `update_todo`   | Update an existing task.            | `id` (str, req), `description`, `priority`, `category`, `dueAt` (all opt)                        | Returns updated item.                              |
+| `complete_todo` | Mark a task as completed.           | `id` (str, req)                                                                                  | Returns updated item.                              |
+| `delete_todo`   | Permanently remove a task.          | `id` (str, req)                                                                                  | Returns summary of deletion.                       |
 
 ### Resources
 
-| URI Template              | Type            | Description                                                       |
-| ------------------------- | --------------- | ----------------------------------------------------------------- |
-| `internal://instructions` | `text/markdown` | Returns usage instructions and context about the Todokit manager. |
+| URI Template              | Type               | Description                                                       |
+| ------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `internal://instructions` | `text/markdown`    | Returns usage instructions and context about the Todokit manager. |
+| `todo://list`             | `application/json` | Returns a live JSON list of all active (pending) todos.           |
 
 ## Client Configuration Examples
 

@@ -8,21 +8,18 @@ type Priority = 'low' | 'medium' | 'high';
 
 const PrioritySchema: ZodType<Priority> = z.enum(['low', 'medium', 'high']);
 
-type Category = 'work' | 'bug' | 'testing' | 'docs';
-
-const CategorySchema: ZodType<Category> = z.enum([
-  'work',
-  'bug',
-  'testing',
-  'docs',
-]);
+const CategorySchema: ZodType<string> = z
+  .string()
+  .min(1)
+  .max(50)
+  .describe('Task category (e.g. work, bug, testing, docs)');
 
 export interface Todo {
   id: string;
   description: string;
   completed: boolean;
   priority: Priority;
-  category: Category;
+  category: string;
   dueAt?: string | undefined;
   createdAt: string;
   updatedAt?: string | undefined;
@@ -48,7 +45,7 @@ type Status = 'pending' | 'completed' | 'all';
 interface TodoInput {
   description: string;
   priority: Priority;
-  category: Category;
+  category: string;
   dueAt?: string | undefined;
 }
 
@@ -68,7 +65,7 @@ interface UpdateTodoInput {
   id: string;
   description?: string | undefined;
   priority?: Priority | undefined;
-  category?: Category | undefined;
+  category?: string | undefined;
   dueAt?: string | undefined;
 }
 
@@ -132,6 +129,14 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
       'Filter by status: pending, completed, or all (default: pending). Results may be truncated for safety.'
     ),
   });
+
+export const SearchTodosSchema = z.strictObject({
+  query: z
+    .string()
+    .min(1)
+    .max(100)
+    .describe('Search query for description or category'),
+});
 
 interface DefaultOutput {
   ok: boolean;

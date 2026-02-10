@@ -953,6 +953,18 @@ class TodoRepository {
       : { kind: 'found', index, todo: current, incompleteCount };
   }
 
+  async search(query: string, signal?: AbortSignal): Promise<readonly Todo[]> {
+    const todos = await this.getAll(signal);
+    if (!query) return todos;
+
+    const lower = query.toLowerCase();
+    return todos.filter(
+      (todo) =>
+        todo.description.toLowerCase().includes(lower) ||
+        todo.category.toLowerCase().includes(lower)
+    );
+  }
+
   private createNotFound(id: string): MatchOutcome {
     return {
       kind: 'error',
@@ -1029,6 +1041,13 @@ export async function completeTodoById(
   signal?: AbortSignal
 ): Promise<CompleteTodoOutcome> {
   return repository.complete(id, completed, signal);
+}
+
+export async function searchTodos(
+  query: string,
+  signal?: AbortSignal
+): Promise<readonly Todo[]> {
+  return repository.search(query, signal);
 }
 
 export async function closeDb(): Promise<void> {

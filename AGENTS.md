@@ -72,7 +72,7 @@
 
 - **Framework:** `node:test` (Node.js built-in test runner) with `tsx` as the TypeScript loader (see `scripts/tasks.mjs`, `package.json` devDependencies: `"tsx": "^4.21.0"`)
 - **Where tests live:** `tests/*.test.ts` (see `tests/` directory; `scripts/tasks.mjs` CONFIG.test.patterns: `['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts']`)
-- **Test files:** `cli.test.ts`, `diagnostics.test.ts`, `errors.test.ts`, `index.test.ts`, `match.test.ts`, `runtime_helpers.test.ts`, `schemas.test.ts`, `storage.test.ts`, `tools.test.ts` (see `tests/`)
+- **Test files:** `cli.test.ts`, `diagnostics.test.ts`, `errors.test.ts`, `index.test.ts`, `match.test.ts`, `runtime_helpers.test.ts`, `schemas.test.ts`, `search.test.ts`, `storage.test.ts`, `tools.test.ts` (see `tests/`)
 - **Approach:** Pure unit tests. Each test creates a temporary directory for isolated JSON storage, cleaned up in `afterEach`. No external services, databases, or containers required. Tool tests use a mock `McpServer` harness that captures registered tools and invokes handlers directly. Assertions use `node:assert/strict`. (see `tests/setup.ts`, `tests/tools.test.ts`)
 - **Setup:** `tests/setup.ts` — `beforeEach` creates `mkdtemp`, sets `TODOKIT_TODO_FILE` and `TODOKIT_ALLOW_OUTSIDE_CWD` env vars; `afterEach` calls `closeDb()`, cleans up env and temp dir. (see `tests/setup.ts`)
 - **Coverage:** `npm run test:coverage` uses `--experimental-test-coverage` (see `scripts/tasks.mjs` getCoverageArgs)
