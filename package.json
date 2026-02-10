@@ -2,7 +2,7 @@
   "name": "@j0hanz/todokit-mcp",
   "version": "2.1.0",
   "mcpName": "io.github.j0hanz/todokit",
-  "description": "A MCP server for Todokit, a task management and productivity tool with JSON storage.",
+  "description": "A Model Context Protocol (MCP) server for managing todo lists using JSON file storage.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
