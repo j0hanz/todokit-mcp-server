@@ -12,7 +12,12 @@ import {
 import { EOL, platform } from 'node:os';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-import { TOOL_ABORT_ERROR_NAME } from './constants.js';
+import {
+  TOOL_ABORT_ERROR_CODE,
+  TOOL_ABORT_ERROR_NAME,
+  TOOL_TIMEOUT_ERROR_CODE,
+  TOOL_TIMEOUT_ERROR_NAME,
+} from './constants.js';
 import { nowMs, publishStorageEvent } from './diagnostics.js';
 import { createErrorResponse, type ErrorResponse } from './responses.js';
 import { type Todo, TodosSchema } from './schema.js';
@@ -85,8 +90,8 @@ interface StorageConfig {
 class StorageError extends Error {
   readonly code: string;
 
-  constructor(code: string, message: string) {
-    super(message);
+  constructor(code: string, message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = 'StorageError';
     this.code = code;
   }
@@ -96,8 +101,12 @@ export function getCodedErrorCode(error: unknown): string | undefined {
   return error instanceof StorageError ? error.code : undefined;
 }
 
-function createCodedError(code: string, message: string): StorageError {
-  return new StorageError(code, message);
+function createCodedError(
+  code: string,
+  message: string,
+  options?: { cause?: unknown }
+): StorageError {
+  return new StorageError(code, message, options);
 }
 
 function getSystemErrorCode(error: unknown): string | undefined {
@@ -118,7 +127,8 @@ function isMissingPathError(error: unknown): boolean {
 function isAbortError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
-    error.name === 'AbortError' || getSystemErrorCode(error) === 'ABORT_ERR'
+    error.name === TOOL_ABORT_ERROR_NAME ||
+    getSystemErrorCode(error) === TOOL_ABORT_ERROR_CODE
   );
 }
 
@@ -131,16 +141,19 @@ function isSameText(expected: string, actual: string): boolean {
   );
 }
 
-function createToolCancelledError(): Error {
-  const error = new Error(TOOL_CANCELLED_MESSAGE);
+function createToolCancelledError(cause?: unknown): Error {
+  const error = new Error(TOOL_CANCELLED_MESSAGE, { cause });
   error.name = TOOL_ABORT_ERROR_NAME;
+  (error as { code?: string }).code = TOOL_ABORT_ERROR_CODE;
   return error;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal) return;
-  if (signal.aborted) {
-    throw createToolCancelledError();
+  try {
+    signal.throwIfAborted();
+  } catch (error) {
+    throw createToolCancelledError(error);
   }
 }
 
@@ -157,12 +170,12 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
       if (!signal) return;
       if (signal.aborted) {
-        reject(createToolCancelledError());
+        reject(createToolCancelledError(signal.reason));
         return;
       }
 
       abortListener = () => {
-        reject(createToolCancelledError());
+        reject(createToolCancelledError(signal.reason));
       };
       signal.addEventListener('abort', abortListener, { once: true });
     });
@@ -369,9 +382,9 @@ class NodeFileSystem implements FileSystemPort {
   ): never {
     if (!isAbortError(error)) throw error;
     if (externalSignal?.aborted) {
-      throw createToolCancelledError();
+      throw createToolCancelledError(error);
     }
-    throw this.createTimeoutError(timeoutMessage);
+    throw this.createTimeoutError(timeoutMessage, error);
   }
 
   private createIoSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
@@ -397,11 +410,11 @@ class NodeFileSystem implements FileSystemPort {
     const abort = signal
       ? new Promise<never>((_, reject) => {
           if (signal.aborted) {
-            reject(createToolCancelledError());
+            reject(createToolCancelledError(signal.reason));
             return;
           }
           abortListener = () => {
-            reject(createToolCancelledError());
+            reject(createToolCancelledError(signal.reason));
           };
           signal.addEventListener('abort', abortListener, { once: true });
         })
@@ -445,9 +458,10 @@ class NodeFileSystem implements FileSystemPort {
     );
   }
 
-  private createTimeoutError(message: string): Error {
-    const error = new Error(message);
-    error.name = 'AbortError';
+  private createTimeoutError(message: string, cause?: unknown): Error {
+    const error = new Error(message, { cause });
+    error.name = TOOL_TIMEOUT_ERROR_NAME;
+    (error as { code?: string }).code = TOOL_TIMEOUT_ERROR_CODE;
     return error;
   }
 }

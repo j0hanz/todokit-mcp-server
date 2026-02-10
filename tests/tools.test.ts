@@ -18,7 +18,10 @@ const TEST_TIMEOUT_MS = 5000;
 const DEFAULT_PRIORITY = 'medium' as const;
 const DEFAULT_CATEGORY = 'work' as const;
 
-type ToolHandler<T> = (input: T) => Promise<CallToolResult>;
+type ToolHandler<T> = (
+  input: T,
+  options?: { signal?: AbortSignal | undefined }
+) => Promise<CallToolResult>;
 
 type StructuredResult = {
   structuredContent?: {
@@ -28,10 +31,9 @@ type StructuredResult = {
   };
 };
 
-function createRequestExtra(): RequestHandlerExtra<
-  ServerRequest,
-  ServerNotification
-> {
+function createRequestExtra(
+  signal?: AbortSignal
+): RequestHandlerExtra<ServerRequest, ServerNotification> {
   const sendNotification: RequestHandlerExtra<
     ServerRequest,
     ServerNotification
@@ -44,7 +46,7 @@ function createRequestExtra(): RequestHandlerExtra<
   };
 
   return {
-    signal: new AbortController().signal,
+    signal: signal ?? new AbortController().signal,
     requestId: 'test-request',
     sendNotification,
     sendRequest,
@@ -78,7 +80,11 @@ function createToolHarness() {
       throw new Error(`Missing handler for ${name}`);
     }
 
-    return (async (input: T) => {
+    return (async (
+      input: T,
+      options?: { signal?: AbortSignal | undefined }
+    ) => {
+      const requestExtra = createRequestExtra(options?.signal);
       if (isRecord(tool.config) && 'inputSchema' in tool.config) {
         const schema = (tool.config as { inputSchema?: unknown }).inputSchema;
         if (
@@ -102,7 +108,7 @@ function createToolHarness() {
               value: unknown,
               extra?: unknown
             ) => Promise<CallToolResult>
-          )(parsed.data, createRequestExtra());
+          )(parsed.data, requestExtra);
         }
       }
 
@@ -111,7 +117,7 @@ function createToolHarness() {
           value: unknown,
           extra?: unknown
         ) => Promise<CallToolResult>
-      )(input, createRequestExtra());
+      )(input, requestExtra);
     }) as ToolHandler<T>;
   };
 
@@ -138,6 +144,18 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
     names.forEach((name) => {
       assert.doesNotThrow(() => getHandler(name));
     });
+  });
+
+  it('returns E_CANCELLED when the request signal is already aborted', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    const listHandler = getHandler<Record<string, never>>('list_todos');
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled in test'));
+
+    const result = await listHandler({}, { signal: controller.signal });
+    assert.equal(getStructured(result)?.error?.code, 'E_CANCELLED');
   });
 
   it('adds single and batch todos', async () => {

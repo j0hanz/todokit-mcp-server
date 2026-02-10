@@ -19,7 +19,12 @@ import type {
 
 import type { z } from 'zod';
 
-import { TOOL_ABORT_ERROR_NAME, TOOL_TIMEOUT_ERROR_NAME } from './constants.js';
+import {
+  TOOL_ABORT_ERROR_CODE,
+  TOOL_ABORT_ERROR_NAME,
+  TOOL_TIMEOUT_ERROR_CODE,
+  TOOL_TIMEOUT_ERROR_NAME,
+} from './constants.js';
 import {
   nowMs,
   publishToolCallWithId,
@@ -102,17 +107,18 @@ function mapExecutionError(
   error: unknown,
   fallbackCode: string
 ): { code: string; message: string } {
+  if (isTimeoutLikeError(error)) {
+    return { code: 'E_TIMEOUT', message: getErrorMessage(error) };
+  }
+  if (isAbortLikeError(error)) {
+    return { code: 'E_CANCELLED', message: getErrorMessage(error) };
+  }
+
   const coded = getCodedErrorCode(error);
   if (coded) {
     return { code: coded, message: getErrorMessage(error) };
   }
-  const systemCode =
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof (error as Record<string, unknown>).code === 'string'
-      ? ((error as Record<string, unknown>).code as string)
-      : undefined;
+  const systemCode = getSystemErrorCode(error);
   if (systemCode) {
     return { code: systemCode, message: getErrorMessage(error) };
   }
@@ -144,6 +150,52 @@ type OnTodosChanged = () => Promise<void> | void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function getSystemErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error)) return undefined;
+  const { code } = error;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === TOOL_ABORT_ERROR_NAME ||
+    getSystemErrorCode(error) === TOOL_ABORT_ERROR_CODE
+  );
+}
+
+function isTimeoutLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = getSystemErrorCode(error);
+  return (
+    error.name === TOOL_TIMEOUT_ERROR_NAME ||
+    code === TOOL_TIMEOUT_ERROR_CODE ||
+    code === 'ERR_TIMEOUT'
+  );
+}
+
+function classifyToolExecutionError(
+  error: unknown
+): 'E_TIMEOUT' | 'E_CANCELLED' | 'E_TOOL_ERROR' {
+  if (isTimeoutLikeError(error)) return 'E_TIMEOUT';
+  if (isAbortLikeError(error)) return 'E_CANCELLED';
+  return 'E_TOOL_ERROR';
+}
+
+function createToolCancelledError(cause?: unknown): Error {
+  const error = new Error('Tool cancelled', { cause });
+  error.name = TOOL_ABORT_ERROR_NAME;
+  (error as { code?: string }).code = TOOL_ABORT_ERROR_CODE;
+  return error;
+}
+
+function createToolTimeoutError(tool: string): Error {
+  const error = new Error(`Tool ${tool} timed out`);
+  error.name = TOOL_TIMEOUT_ERROR_NAME;
+  (error as { code?: string }).code = TOOL_TIMEOUT_ERROR_CODE;
+  return error;
 }
 
 function extractOutcome(result: CallToolResult): {
@@ -230,8 +282,8 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     }
 
     const controller = new AbortController();
-    const propagateAbort = (): void => {
-      if (!controller.signal.aborted) controller.abort();
+    const propagateAbort = (reason?: unknown): void => {
+      if (!controller.signal.aborted) controller.abort(reason);
     };
 
     let result: CallToolResult | Promise<CallToolResult>;
@@ -256,9 +308,8 @@ function createWrappedHandler<InputArgs extends AnySchema>(
       promises.push(
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
-            propagateAbort();
-            const error = new Error(`Tool ${tool} timed out`);
-            error.name = TOOL_TIMEOUT_ERROR_NAME;
+            const error = createToolTimeoutError(tool);
+            propagateAbort(error);
             reject(error);
           }, timeoutMs);
         })
@@ -271,9 +322,8 @@ function createWrappedHandler<InputArgs extends AnySchema>(
     promises.push(
       new Promise<never>((_, reject) => {
         const listener = (): void => {
-          propagateAbort();
-          const error = new Error('Tool cancelled');
-          error.name = TOOL_ABORT_ERROR_NAME;
+          const error = createToolCancelledError(extra.signal.reason);
+          propagateAbort(error);
           reject(error);
         };
         if (extra.signal.aborted) {
@@ -296,12 +346,7 @@ function createWrappedHandler<InputArgs extends AnySchema>(
         return resolved;
       })
       .catch((error: unknown) => {
-        // Inlined classification
-        let code = 'E_TOOL_ERROR';
-        if (error instanceof Error) {
-          if (error.name === TOOL_TIMEOUT_ERROR_NAME) code = 'E_TIMEOUT';
-          else if (error.name === TOOL_ABORT_ERROR_NAME) code = 'E_CANCELLED';
-        }
+        const code = classifyToolExecutionError(error);
 
         if (code !== 'E_TOOL_ERROR') {
           const response = createErrorResponse(code, getErrorMessage(error));
