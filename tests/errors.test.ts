@@ -12,6 +12,7 @@ describe('errors', () => {
     );
     assert.equal(getErrorMessage('string error'), 'string error');
     assert.equal(getErrorMessage({ message: 'object error' }), 'object error');
+    assert.equal(getErrorMessage({ code: 'ENOENT' }), 'Error (ENOENT)');
     assert.equal(getErrorMessage({}), 'Unknown error');
   });
 

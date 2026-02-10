@@ -17,9 +17,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function getErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error)) return undefined;
+  const { code } = error;
+  return typeof code === 'string' && code.length > 0 ? code : undefined;
+}
+
 function normalizeMessage(message: unknown): string | undefined {
   if (typeof message !== 'string' || message.length === 0) return undefined;
-  const sanitized = stripVTControlCharacters(message);
+  const sanitized = stripVTControlCharacters(message).trim();
   return sanitized.length > 0 ? sanitized : undefined;
 }
 
@@ -34,6 +40,8 @@ export function getErrorMessage(error: unknown): string {
     const recordMessage = normalizeMessage(error.message);
     if (recordMessage) return recordMessage;
   }
+  const code = getErrorCode(error);
+  if (code) return `Error (${code})`;
   return 'Unknown error';
 }
 

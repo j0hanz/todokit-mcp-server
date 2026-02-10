@@ -163,6 +163,16 @@ function mapExecutionError(
   if (coded) {
     return { code: coded, message: getErrorMessage(error) };
   }
+  const systemCode =
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as Record<string, unknown>).code === 'string'
+      ? ((error as Record<string, unknown>).code as string)
+      : undefined;
+  if (systemCode) {
+    return { code: systemCode, message: getErrorMessage(error) };
+  }
   return { code: fallbackCode, message: getErrorMessage(error) };
 }
 
@@ -285,10 +295,9 @@ function createWrappedHandler<InputArgs extends AnySchema>(
         handler(input, { ...extra, signal: controller.signal })
       );
     } catch (error: unknown) {
-      publishFailureResult(tool, requestId, startedAt);
-      const rejection =
-        error instanceof Error ? error : new Error(String(error));
-      return Promise.reject(rejection);
+      const response = createExecutionErrorResponse(error, 'E_TOOL_ERROR');
+      publishSuccessResult(tool, requestId, startedAt, response);
+      return Promise.resolve(response);
     }
 
     const timeoutMs = getToolTimeoutMs();
@@ -322,10 +331,7 @@ function createWrappedHandler<InputArgs extends AnySchema>(
 
         if (interruption) {
           const code = interruption === 'timeout' ? 'E_TIMEOUT' : 'E_CANCELLED';
-          const response = createErrorResponse(
-            code,
-            error instanceof Error ? error.message : String(error)
-          );
+          const response = createErrorResponse(code, getErrorMessage(error));
           publishSuccessResult(tool, requestId, startedAt, response);
           return response;
         }

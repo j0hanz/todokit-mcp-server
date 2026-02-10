@@ -135,4 +135,46 @@ describe('search_todos', { timeout: TEST_TIMEOUT_MS }, () => {
     const items = (structured?.result as any).items as any[];
     assert.equal(items.length, 0);
   });
+
+  it('matches case-insensitively', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    await addTodos([
+      {
+        description: 'Prepare Release Notes',
+        priority: 'high',
+        category: 'work',
+      },
+    ]);
+
+    const searchHandler = getHandler<{ query: string }>('search_todos');
+    const result = await searchHandler({ query: 'release notes' });
+
+    const structured = getStructured(result);
+    const items = (structured?.result as any).items as any[];
+    assert.equal(items.length, 1);
+    assert.equal(items[0].description, 'Prepare Release Notes');
+  });
+
+  it('matches Unicode text with accent-insensitive search', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    await addTodos([
+      {
+        description: 'Plan café launch',
+        priority: 'medium',
+        category: 'réunions',
+      },
+    ]);
+
+    const searchHandler = getHandler<{ query: string }>('search_todos');
+    const result = await searchHandler({ query: 'reunions' });
+
+    const structured = getStructured(result);
+    const items = (structured?.result as any).items as any[];
+    assert.equal(items.length, 1);
+    assert.equal(items[0].category, 'réunions');
+  });
 });

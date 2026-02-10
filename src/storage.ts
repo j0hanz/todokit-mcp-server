@@ -9,6 +9,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { EOL, platform } from 'node:os';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { TOOL_ABORT_ERROR_NAME } from './constants.js';
@@ -17,6 +18,12 @@ import { createErrorResponse, type ErrorResponse } from './responses.js';
 import { type Todo, TodosSchema } from './schema.js';
 
 const TOOL_CANCELLED_MESSAGE = 'Tool cancelled';
+const IS_WINDOWS = platform() === 'win32';
+const TRANSIENT_RENAME_ERROR_CODES = new Set<string>(
+  IS_WINDOWS
+    ? ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']
+    : ['EBUSY', 'EPERM', 'EACCES']
+);
 
 interface FileMetadata {
   mtimeMs: number;
@@ -94,15 +101,9 @@ function createCodedError(code: string, message: string): StorageError {
 }
 
 function getSystemErrorCode(error: unknown): string | undefined {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof (error as Record<string, unknown>).code === 'string'
-  ) {
-    return (error as { code: string }).code;
-  }
-  return undefined;
+  if (typeof error !== 'object' || error === null) return undefined;
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' ? code : undefined;
 }
 
 function isNotFoundError(error: unknown): boolean {
@@ -115,7 +116,10 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === 'AbortError' || getSystemErrorCode(error) === 'ABORT_ERR'
+  );
 }
 
 function isSameText(expected: string, actual: string): boolean {
@@ -434,8 +438,11 @@ class NodeFileSystem implements FileSystemPort {
 
   private shouldRetryRename(error: unknown, attempt: number): boolean {
     const code = getSystemErrorCode(error);
-    const isTransient = code && ['EBUSY', 'EPERM', 'EACCES'].includes(code);
-    return !!isTransient && attempt < 2;
+    return (
+      code !== undefined &&
+      TRANSIENT_RENAME_ERROR_CODES.has(code) &&
+      attempt < 2
+    );
   }
 
   private createTimeoutError(message: string): Error {
@@ -453,7 +460,7 @@ class LockFileManager implements LockPort {
   ): Promise<() => Promise<void>> {
     const lockPath = `${path}.lock`;
     const started = nowMs();
-    const lockContent = `${String(process.pid)} ${new Date().toISOString()} ${randomUUID()}\n`;
+    const lockContent = `${String(process.pid)} ${new Date().toISOString()} ${randomUUID()}${EOL}`;
 
     await mkdir(dirname(path), { recursive: true });
 
@@ -744,7 +751,7 @@ class JsonFileStore<T> {
     const start = nowMs();
     throwIfAborted(signal);
 
-    const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}\n`;
+    const payload = `${JSON.stringify(data, null, this.config.jsonIndentation)}${EOL}`;
     const payloadBytes = Buffer.byteLength(payload, 'utf8');
     if (payloadBytes > this.config.maxTodoFileBytes) {
       throw createCodedError(
@@ -853,6 +860,64 @@ interface NewTodoInput {
 type IndexLookup =
   | { kind: 'found'; index: number; todo: Todo; incompleteCount: number }
   | { kind: 'not_found'; incompleteCount: number };
+
+interface SearchMatcher {
+  matches(value: string): boolean;
+}
+
+function splitByGrapheme(
+  value: string,
+  segmenter: Intl.Segmenter | null
+): string[] {
+  if (!segmenter) return Array.from(value);
+  return Array.from(segmenter.segment(value), ({ segment }) => segment);
+}
+
+function createSearchMatcher(query: string): SearchMatcher {
+  if (!query) {
+    return {
+      matches: () => true,
+    };
+  }
+
+  const collator = new Intl.Collator(undefined, {
+    usage: 'search',
+    sensitivity: 'base',
+    ignorePunctuation: true,
+  });
+  const segmenter =
+    typeof Intl.Segmenter === 'function'
+      ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+      : null;
+  const needle = query.normalize('NFKC');
+  const needleParts = splitByGrapheme(needle, segmenter);
+  const needleLength = needleParts.length;
+
+  if (needleLength === 0) {
+    return {
+      matches: () => true,
+    };
+  }
+
+  const matches = (value: string): boolean => {
+    const haystack = value.normalize('NFKC');
+    const haystackParts = splitByGrapheme(haystack, segmenter);
+
+    if (haystackParts.length < needleLength) return false;
+
+    for (let index = 0; index <= haystackParts.length - needleLength; index++) {
+      const candidate = haystackParts
+        .slice(index, index + needleLength)
+        .join('');
+      if (collator.compare(candidate, needle) === 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  return { matches };
+}
 
 class TodoRepository {
   constructor(private readonly store: JsonFileStore<Todo[]>) {}
@@ -1012,13 +1077,10 @@ class TodoRepository {
 
   async search(query: string, signal?: AbortSignal): Promise<readonly Todo[]> {
     const todos = await this.getAll(signal);
-    if (!query) return todos;
-
-    const lower = query.toLowerCase();
+    const matcher = createSearchMatcher(query);
     return todos.filter(
       (todo) =>
-        todo.description.toLowerCase().includes(lower) ||
-        todo.category.toLowerCase().includes(lower)
+        matcher.matches(todo.description) || matcher.matches(todo.category)
     );
   }
 
@@ -1027,8 +1089,7 @@ class TodoRepository {
       kind: 'error',
       response: createErrorResponse(
         'E_NOT_FOUND',
-        `Todo with ID ${id} not
- found`
+        `Todo with ID ${id} not found`
       ),
     };
   }
