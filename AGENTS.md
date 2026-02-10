@@ -4,85 +4,118 @@
 
 ## 1) Project Context
 
-- **Domain:** MCP (Model Context Protocol) server for task/todo management with local JSON file storage, published as `@j0hanz/todokit-mcp` on npm.
+- **Domain:** MCP (Model Context Protocol) server for task management — a local, persistent todo list with JSON file storage, cursor pagination, and diagnostics.
 - **Tech Stack (Verified):**
-  - **Languages:** TypeScript 5.9+ (see `package.json` devDependencies: `"typescript": "^5.9.3"`), Node.js >=24 (see `package.json` engines)
-  - **Frameworks:** `@modelcontextprotocol/sdk` ^1.26.0 (see `package.json` dependencies)
-  - **Key Libraries:** Zod ^4.3.6 (see `package.json` dependencies), ESLint 9.x with typescript-eslint (see `eslint.config.mjs`), Prettier 3.x with import-sort plugin (see `.prettierrc`)
-- **Architecture:** Single-package MCP server using stdio transport. Tools registered via `registerAllTools()` function. Storage layer uses atomic JSON file writes with file-based locking and in-memory caching. Diagnostics emitted via `node:diagnostics_channel`. Request context propagated via `AsyncLocalStorage`. (see `src/index.ts`, `src/tools.ts`, `src/storage.ts`, `src/diagnostics.ts`, `src/requestContext.ts`)
+  - **Language:** TypeScript 5.9+ (see `package.json` devDependencies, `tsconfig.json`)
+  - **Runtime:** Node.js ≥ 24 (see `package.json` `engines`)
+  - **Framework:** `@modelcontextprotocol/sdk` ^1.26.0 — MCP server SDK v1.x (see `package.json` dependencies)
+  - **Key Libraries:**
+    - `zod` ^4.3.6 — schema validation with `z.strictObject()` (see `package.json`, `src/schema.ts`)
+    - `tsx` ^4.21.0 — TypeScript execution for tests (see `package.json` devDependencies)
+    - `eslint` ^9.39.2 + `typescript-eslint` ^8.54.0 (see `eslint.config.mjs`)
+    - `prettier` ^3.8.1 + `@trivago/prettier-plugin-sort-imports` ^6.0.2 (see `.prettierrc`)
+- **Architecture:** Single-package MCP server using stdio transport. Storage layer uses atomic JSON file writes with file-based locking and in-memory caching. Diagnostics via `node:diagnostics_channel`. Request context propagated via `AsyncLocalStorage`. (see `src/index.ts`, `src/storage.ts`, `src/diagnostics.ts`, `src/requestContext.ts`)
 
 ## 2) Repository Map (High-Level)
 
-- `src/`: Server source code — entrypoint, tool handlers, storage engine, schemas, response helpers, diagnostics (see `src/index.ts` for entrypoint)
-- `tests/`: Unit tests using `node:test` with `tsx` loader (see `tests/setup.ts`, `tests/*.test.ts`)
-- `scripts/`: Build orchestration script (`tasks.mjs`) — clean, compile, validate, copy assets, make executable (see `scripts/tasks.mjs`)
-- `assets/`: Server icon (`logo.svg`) embedded as base64 data URI at startup (see `src/index.ts`)
-- `.github/workflows/`: CI — `publish.yml` triggers on release to build, lint, test, and publish to npm via OIDC trusted publishing (see `.github/workflows/publish.yml`)
+- `src/` — Main source code (see `tsconfig.json` `rootDir`)
+  - `index.ts` — CLI entrypoint with shebang, server creation, transport wiring, shutdown handling
+  - `tools.ts` — Tool registration, handler wrappers with timeout/abort/diagnostics
+  - `storage.ts` — JSON file storage with Port/Adapter interfaces (`FileSystemPort`, `LockPort`), atomic writes, file locking, caching, `TodoRepository`
+  - `schema.ts` — Zod schemas for all tool inputs/outputs using `z.strictObject()`
+  - `responses.ts` — `createToolResponse()` / `createErrorResponse()` helpers
+  - `diagnostics.ts` — `node:diagnostics_channel` publishers for tool, storage, and lifecycle events
+  - `requestContext.ts` — `AsyncLocalStorage`-based request context
+  - `constants.ts` — Error name/code constants
+  - `instructions.md` — Server instructions resource (bundled into dist)
+- `tests/` — Test files using `node:test` (see `tests/setup.ts`, `tests/*.test.ts`)
+- `scripts/` — Build orchestration (`scripts/tasks.mjs`)
+- `assets/` — Server icon (`assets/logo.svg`)
+- `.github/workflows/` — CI/CD: publish to npm on release (see `publish.yml`)
 
-> Ignored: `dist/`, `node_modules/`, `coverage/`, `.tsbuildinfo`
+> Ignore: `dist/`, `node_modules/`, `coverage/`, `.tsbuildinfo`
 
 ## 3) Operational Commands (Verified)
 
-- **Environment:** Node.js >=24 required (see `package.json` engines). No containerization. Uses `tsx` for test TypeScript loading (see `scripts/tasks.mjs`).
-- **Install:** `npm ci` (see `.github/workflows/publish.yml` step "Install dependencies")
-- **Dev:** `npm run dev` — `tsc --watch --preserveWatchOutput` (see `package.json` scripts). `npm run dev:run` — `node --env-file=.env --watch dist/index.js` (see `package.json` scripts)
-- **Test:** `npm run test` — builds first, then runs `node --test --import tsx/esm` on `tests/**/*.test.ts` (see `scripts/tasks.mjs` TestTasks.test). `npm run test:coverage` for coverage (see `package.json` scripts, `.github/workflows/publish.yml`)
-- **Build:** `npm run build` — clean → TypeScript compile (`tsconfig.build.json`) → validate instructions → copy assets → chmod 755 (see `scripts/tasks.mjs` Pipeline.fullBuild)
-- **Type-check:** `npm run type-check` — `tsc -p tsconfig.json --noEmit` (see `scripts/tasks.mjs`, `package.json` scripts)
-- **Lint:** `npm run lint` — `eslint .` (see `package.json` scripts, `.github/workflows/publish.yml`)
-- **Format:** `npm run format` — `prettier --write .` (see `package.json` scripts)
-- **Duplication check:** `npm run dup-check` — **UNVERIFIED** (referenced in CI `publish.yml` step "Run duplication check" but no matching script in `package.json`; likely uses `jscpd` per devDependencies and `.jscpd.json`)
-- **Inspector:** `npm run inspector` — `npx @modelcontextprotocol/inspector` for debugging (see `package.json` scripts)
-- **Dead code:** `npm run knip` — unused exports/dependencies detection (see `package.json` scripts)
+- **Environment:** Node.js ≥ 24, npm (see `package.json` `engines`, `package-lock.json`)
+- **Install:** `npm ci` (see `.github/workflows/publish.yml`)
+- **Dev (watch):** `npm run dev` → `tsc --watch --preserveWatchOutput` (see `package.json` scripts)
+- **Dev (run):** `npm run dev:run` → `node --env-file=.env --watch dist/index.js` (see `package.json` scripts)
+- **Build:** `npm run build` → clean, compile (`tsc -p tsconfig.build.json`), validate instructions, copy assets, chmod executable (see `scripts/tasks.mjs`)
+- **Type-check:** `npm run type-check` → `tsc -p tsconfig.json --noEmit` (see `scripts/tasks.mjs`)
+- **Test:** `npm run test` → builds first, then `node --test --import tsx/esm tests/**/*.test.ts` (see `scripts/tasks.mjs`)
+- **Test with coverage:** `npm run test:coverage` → adds `--experimental-test-coverage` (see `scripts/tasks.mjs`)
+- **Lint:** `npm run lint` → `eslint .` (see `package.json` scripts)
+- **Lint fix:** `npm run lint:fix` → `eslint . --fix` (see `package.json` scripts)
+- **Format:** `npm run format` → `prettier --write .` (see `package.json` scripts)
+- **Duplication check:** `npm run dup-check` → `jscpd --config .jscpd.json` (see `package.json` scripts)
+- **Dead code check:** `npm run knip` (see `package.json` scripts)
+- **Inspector:** `npm run inspector` → `npx @modelcontextprotocol/inspector` (see `package.json` scripts)
+- **Full validation sequence:** `npm run format; npm run lint; npm run type-check; npm run build; npm run test`
 
 ## 4) Coding Standards (Style & Patterns)
 
-- **Naming:** camelCase for variables/functions, PascalCase for types/classes/enums, UPPER_CASE for constants. Properties are unformatted. Enforced by `@typescript-eslint/naming-convention` (see `eslint.config.mjs`).
-- **Structure:** All source in `src/`. One concern per file: `schema.ts` (Zod schemas), `storage.ts` (persistence), `tools.ts` (MCP tool registration + handlers), `responses.ts` (response helpers), `diagnostics.ts` (observability), `requestContext.ts` (AsyncLocalStorage), `constants.ts` (shared constants), `index.ts` (entrypoint + CLI + server wiring). (see `src/`)
-- **Typing/Strictness:** TypeScript `strict` mode with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `isolatedModules`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `noImplicitOverride` (see `tsconfig.json`).
+- **Naming:** camelCase for variables/functions, PascalCase for types/classes/enums, UPPER_CASE for constants. Enforced via `@typescript-eslint/naming-convention` (see `eslint.config.mjs`).
+- **Imports:**
+  - **Named exports only** — no default exports (see `.github/instructions/typescript-mcp-server.instructions.md`).
+  - **Type-only imports** enforced: `import type { X }` or `import { type X }` (see `eslint.config.mjs` `consistent-type-imports` rule).
+  - **`.js` extensions** required in local imports (NodeNext module resolution; see `tsconfig.json`).
+  - **Import order** enforced by `@trivago/prettier-plugin-sort-imports`: node builtins → MCP SDK → zod → third-party → local (see `.prettierrc`).
+- **TypeScript Strictness:** `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `isolatedModules`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch` — all enabled (see `tsconfig.json`).
+- **Explicit return types** required on exported functions (see `eslint.config.mjs` `explicit-function-return-type` rule).
+- **Formatting:** Prettier — single quotes, trailing commas (es5), 2-space indent, 80 char width, LF line endings (see `.prettierrc`).
+- **Schemas:** All Zod schemas use `z.strictObject()` with `.describe()` on every parameter and bounds (`.min()`, `.max()`) on strings/arrays/numbers (see `src/schema.ts`, `.github/instructions/typescript-mcp-server.instructions.md`).
+- **Tool output shape:** Always return both `content` (JSON text) and `structuredContent` in tool results. On failure set `isError: true` with `{ ok: false, error: { code, message } }` (see `src/responses.ts`, `.github/instructions/typescript-mcp-server.instructions.md`).
 - **Patterns Observed:**
-  - **Type-only imports required:** `import type { X }` enforced via `@typescript-eslint/consistent-type-imports` (see `eslint.config.mjs`)
-  - **Named exports only:** No default exports; explicit return types on exported functions enforced via `@typescript-eslint/explicit-function-return-type` (see `eslint.config.mjs`)
-  - **`.js` extensions in local imports:** Required by `moduleResolution: "NodeNext"` (see `tsconfig.json`, observed in all `src/*.ts` files)
-  - **Strict Zod schemas:** `z.strictObject()` for all input/output schemas with `.describe()` on every parameter and `.min()`/`.max()` bounds (see `src/schema.ts`)
-  - **Dual response pattern:** Every tool response sets both `content` (JSON text) and `structuredContent` via `createToolResponse()` / `createErrorResponse()` helpers (see `src/responses.ts`, `src/tools.ts`)
-  - **Tool errors over protocol errors:** Tool failures return `isError: true` in the result rather than throwing exceptions (see `src/tools.ts`)
-  - **Diagnostic channels:** Observability via `node:diagnostics_channel` with channels `todokit:tool`, `todokit:storage`, `todokit:lifecycle` (see `src/diagnostics.ts`)
-  - **Atomic file writes:** Storage uses write-to-temp-then-rename with file-based locking and optimistic concurrency control (see `src/storage.ts`)
-  - **Import ordering:** Enforced by Prettier with `@trivago/prettier-plugin-sort-imports`: node builtins → MCP SDK → zod → third-party → local (see `.prettierrc`)
-  - **Shebang required:** `src/index.ts` must start with `#!/usr/bin/env node` as the first line (see `src/index.ts`)
-  - **Graceful shutdown:** `SIGINT`/`SIGTERM` handlers close DB and server cleanly (see `src/index.ts`)
-  - **`console.error()` for logging:** Never write non-MCP output to stdout (stdio transport hygiene) (see `src/index.ts`)
+  - Port/Adapter pattern for I/O boundaries: `FileSystemPort`, `LockPort` interfaces decoupled from `NodeFileSystem`, `LockFileManager` implementations (observed in `src/storage.ts`).
+  - Coded error domain: `StorageError` with `code` field; `createErrorResponse()` maps to structured output (observed in `src/storage.ts`, `src/responses.ts`).
+  - Diagnostics-first instrumentation: every tool call and storage operation publishes events via `node:diagnostics_channel` channels `todokit:tool`, `todokit:storage`, `todokit:lifecycle` (observed in `src/diagnostics.ts`, `src/tools.ts`).
+  - Request context via `AsyncLocalStorage` for correlating tool calls with storage events (observed in `src/requestContext.ts`, `src/diagnostics.ts`).
+  - Atomic file writes: write to temp file, then rename with retry on transient OS errors (observed in `src/storage.ts` `NodeFileSystem.writeTextAtomic()`).
+  - File-based locking with exponential backoff and ownership verification via `timingSafeEqual` (observed in `src/storage.ts` `LockFileManager`).
+  - In-memory cache with mtime-based invalidation (observed in `src/storage.ts` `JsonFileStore`).
+  - Cursor-based pagination using base64url-encoded JSON payloads (observed in `src/tools.ts`).
+  - Tool wrapper with timeout, abort, and diagnostics tracing (observed in `src/tools.ts` `createWrappedHandler()`).
+  - Shebang required: `src/index.ts` must start with `#!/usr/bin/env node` as the first line (see `.github/instructions/typescript-mcp-server.instructions.md`).
+  - Logging to stderr only — never write non-MCP output to stdout (see `.github/instructions/typescript-mcp-server.instructions.md`).
 
 ## 5) Agent Behavioral Rules (Do Nots)
 
-- Do not introduce new dependencies without updating `package.json` and running `npm install` to regenerate `package-lock.json`. (see `package-lock.json`, `package.json`)
+- Do not introduce new dependencies without updating `package.json` and running `npm install` to regenerate `package-lock.json`. (see `package.json`, `package-lock.json`)
 - Do not edit `package-lock.json` manually. (see `package-lock.json`)
-- Do not commit secrets; never print `.env` values; use `process.env` for configuration with the `TODOKIT_*` prefix convention. (see `src/storage.ts`, `src/index.ts`, `.gitignore` listing `.env*`)
-- Do not write anything to `stdout` except MCP JSON-RPC messages — use `console.error()` for logging. (see `src/index.ts`, stdio transport requirement)
-- Do not use default exports — use named exports only. (see `eslint.config.mjs` rules, project convention)
-- Do not use `zod/v3` — standardize on Zod v4 (`import { z } from 'zod'`). (see `package.json` dependencies: `"zod": "^4.3.6"`)
+- Do not commit secrets; never print `.env` values; use `process.env` for config. (see `.gitignore` excludes `.env*`)
+- Do not use default exports; use named exports only. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not write non-MCP output to stdout — use `console.error()` for logging. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not use `any` — `@typescript-eslint/no-explicit-any` is set to error. (see `eslint.config.mjs`)
+- Do not omit `.js` extensions on local imports. (see `tsconfig.json` `moduleResolution: "NodeNext"`)
+- Do not use `z.object()` — always use `z.strictObject()` for schema definitions. (see `.github/instructions/typescript-mcp-server.instructions.md`, `src/schema.ts`)
+- Do not return tool results without both `content` and `structuredContent`. (see `src/responses.ts`, `.github/instructions/typescript-mcp-server.instructions.md`)
 - Do not disable or bypass existing lint/type rules without explicit approval. (see `eslint.config.mjs`, `tsconfig.json`)
-- Do not omit `.js` extensions in local imports — required by NodeNext module resolution. (see `tsconfig.json`)
-- Do not omit `.describe()` on Zod schema parameters — required for LLM guidance. (see `src/schema.ts`)
-- Do not throw uncaught exceptions from tool handlers — return `isError: true` via `createErrorResponse()`. (see `src/tools.ts`, `src/responses.ts`)
-- Do not change public tool names/schemas without updating tests. (see `tests/tools.test.ts`, `tests/schemas.test.ts`)
+- Do not throw uncaught exceptions from tool handlers; return `isError: true` responses. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not remove the shebang line (`#!/usr/bin/env node`) from `src/index.ts`. (see `.github/instructions/typescript-mcp-server.instructions.md`)
 
 ## 6) Testing Strategy (Verified)
 
-- **Framework:** `node:test` (Node.js built-in test runner) with `tsx` as the TypeScript loader (see `scripts/tasks.mjs`, `package.json` devDependencies: `"tsx": "^4.21.0"`)
-- **Where tests live:** `tests/*.test.ts` (see `tests/` directory; `scripts/tasks.mjs` CONFIG.test.patterns: `['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts']`)
-- **Test files:** `cli.test.ts`, `diagnostics.test.ts`, `errors.test.ts`, `index.test.ts`, `match.test.ts`, `runtime_helpers.test.ts`, `schemas.test.ts`, `search.test.ts`, `storage.test.ts`, `tools.test.ts` (see `tests/`)
-- **Approach:** Pure unit tests. Each test creates a temporary directory for isolated JSON storage, cleaned up in `afterEach`. No external services, databases, or containers required. Tool tests use a mock `McpServer` harness that captures registered tools and invokes handlers directly. Assertions use `node:assert/strict`. (see `tests/setup.ts`, `tests/tools.test.ts`)
-- **Setup:** `tests/setup.ts` — `beforeEach` creates `mkdtemp`, sets `TODOKIT_TODO_FILE` and `TODOKIT_ALLOW_OUTSIDE_CWD` env vars; `afterEach` calls `closeDb()`, cleans up env and temp dir. (see `tests/setup.ts`)
-- **Coverage:** `npm run test:coverage` uses `--experimental-test-coverage` (see `scripts/tasks.mjs` getCoverageArgs)
+- **Framework:** `node:test` (Node.js built-in test runner) with `tsx` loader for TypeScript (see `scripts/tasks.mjs`, `package.json` devDependencies)
+- **Where tests live:** `tests/*.test.ts` (see `scripts/tasks.mjs` `CONFIG.test.patterns`)
+- **Setup:** `tests/setup.ts` — `beforeEach` creates a temp directory and sets `TODOKIT_TODO_FILE` env var; `afterEach` closes DB and cleans up. Each test runs in isolation. (see `tests/setup.ts`)
+- **Approach:**
+  - Unit tests with a mock `McpServer` harness that captures registered tools and calls handlers directly (observed in `tests/tools.test.ts`).
+  - Storage tests use real filesystem via temp directories — no mocks for I/O. (see `tests/setup.ts`, `tests/storage.test.ts`)
+  - Assertions via `node:assert/strict`. (observed in `tests/tools.test.ts`)
+  - Tests import directly from `src/` (not `dist/`), run via `tsx`. (observed in test imports)
+- **Coverage:** `npm run test:coverage` adds `--experimental-test-coverage`. (see `scripts/tasks.mjs`)
+- **Timeout:** Test-level timeouts set per test (e.g., `TEST_TIMEOUT_MS = 5000`). (observed in `tests/tools.test.ts`)
+- **No external services required.** Tests are fully self-contained with temp file storage.
 
 ## 7) Common Pitfalls (Verified)
 
-- Build must succeed before tests — `npm run test` automatically triggers a full build first. Running `node --test` directly without building will fail. (see `scripts/tasks.mjs` TestTasks.test calling `Pipeline.fullBuild()`)
-- `src/instructions.md` must exist — build validation checks for it and fails if missing. (see `scripts/tasks.mjs` BuildTasks.validate)
-- Storage file is auto-deleted when all todos are completed — this is by design, not a bug. (see `src/storage.ts` TodoRepository.complete, tool descriptions in `src/tools.ts`)
-- `TODOKIT_TODO_FILE` path must be within CWD unless `TODOKIT_ALLOW_OUTSIDE_CWD` is set — symlink traversal is blocked for security. (see `src/storage.ts` EnvStorageConfig.validatePathSafety)
+- **Forgetting `.js` in imports** → TypeScript compiles but runtime fails with `ERR_MODULE_NOT_FOUND`. Always use `.js` extensions for local imports. (see `tsconfig.json` `moduleResolution: "NodeNext"`)
+- **Using `z.object()` instead of `z.strictObject()`** → unknown fields silently pass validation. The codebase exclusively uses `z.strictObject()`. (see `src/schema.ts`)
+- **Writing to stdout** → corrupts JSON-RPC stdio transport. Use `console.error()`. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- **Forgetting `structuredContent`** → tool responses must include both `content` (text) and `structuredContent`. Use `createToolResponse()` / `createErrorResponse()` helpers. (see `src/responses.ts`)
+- **Build required before test** → `npm run test` triggers a full build automatically via `scripts/tasks.mjs`. Running tests directly without `tsx` loader will fail.
+- **Storage file auto-deletion** → when all todos are completed, the JSON file is automatically deleted. Tests must account for this behavior. (see `src/storage.ts` `deleteFile` flag in transactions)
 
 ## 8) Evolution Rules
 
