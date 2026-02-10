@@ -177,4 +177,88 @@ describe('search_todos', { timeout: TEST_TIMEOUT_MS }, () => {
     assert.equal(items.length, 1);
     assert.equal(items[0].category, 'réunions');
   });
+
+  it('supports status filtering and cursor pagination', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    const [one, two, three] = await addTodos([
+      { description: 'Task alpha', priority: 'high', category: 'work' },
+      { description: 'Task beta', priority: 'high', category: 'work' },
+      { description: 'Task gamma', priority: 'high', category: 'work' },
+    ]);
+    assert.ok(one);
+    assert.ok(two);
+    assert.ok(three);
+
+    const completeHandler = getHandler<{ id: string }>('complete_todo');
+    await completeHandler({ id: two.id });
+
+    const searchHandler = getHandler<{
+      query: string;
+      status?: 'pending' | 'completed' | 'all';
+      limit?: number;
+      cursor?: string;
+    }>('search_todos');
+
+    const pendingResult = await searchHandler({ query: 'Task' });
+    const pendingStructured = getStructured(pendingResult)?.result as any;
+    assert.equal(pendingStructured.totalMatches, 2);
+    assert.equal(pendingStructured.status, 'pending');
+
+    const page1 = await searchHandler({
+      query: 'Task',
+      status: 'all',
+      limit: 2,
+    });
+    const page1Structured = getStructured(page1)?.result as any;
+    assert.equal(page1Structured.returned, 2);
+    assert.equal(page1Structured.hasMore, true);
+    assert.equal(typeof page1Structured.nextCursor, 'string');
+
+    const page2 = await searchHandler({
+      query: 'Task',
+      status: 'all',
+      limit: 2,
+      cursor: page1Structured.nextCursor as string,
+    });
+    const page2Structured = getStructured(page2)?.result as any;
+    assert.equal(page2Structured.returned, 1);
+    assert.equal(page2Structured.hasMore, false);
+  });
+
+  it('returns invalid params for mismatched cursor context', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    await addTodos([
+      { description: 'Cursor target', priority: 'medium', category: 'work' },
+      { description: 'Cursor other', priority: 'medium', category: 'work' },
+    ]);
+
+    const searchHandler = getHandler<{
+      query: string;
+      status?: 'pending' | 'completed' | 'all';
+      limit?: number;
+      cursor?: string;
+    }>('search_todos');
+
+    const first = await searchHandler({
+      query: 'Cursor',
+      status: 'all',
+      limit: 1,
+    });
+    const firstStructured = getStructured(first)?.result as any;
+    const cursor = firstStructured.nextCursor as string;
+    assert.equal(typeof cursor, 'string');
+
+    const mismatched = await searchHandler({
+      query: 'target',
+      status: 'all',
+      cursor,
+    });
+    const mismatchedStructured = getStructured(mismatched);
+    assert.equal(mismatchedStructured?.ok, false);
+    assert.equal(mismatchedStructured?.error?.code, 'E_INVALID_PARAMS');
+  });
 });

@@ -25,7 +25,7 @@ Todokit MCP provides a lightweight, local task management system that integrates
 
 ## Tech Stack
 
-- **Runtime**: Node.js >=22.19.8
+- **Runtime**: Node.js >=24
 - **Language**: TypeScript 5.9
 - **SDK**: Model Context Protocol SDK (`@modelcontextprotocol/sdk`)
 - **Libraries**: Zod (validation)
@@ -47,7 +47,7 @@ c:\todokit-mcp
 
 ## Requirements
 
-- Node.js >=22.19.8
+- Node.js >=24
 
 ## Quickstart
 
@@ -71,28 +71,29 @@ The server can be configured via CLI arguments or environment variables.
 
 ### Environment Variables
 
-| Variable                      | Description                                                     | Default               |
-| ----------------------------- | --------------------------------------------------------------- | --------------------- |
-| `TODOKIT_TODO_FILE`           | Absolute or relative path to the todo storage file.             | `todos.json` (in CWD) |
-| `TODOKIT_JSON_PRETTY`         | Set to `true` or `1` to indent JSON files with 2 spaces.        | `false` (compact)     |
-| `TODOKIT_TOOL_TIMEOUT_MS`     | Timeout for tool execution in milliseconds.                     | `60000`               |
-| `TODOKIT_LOCK_TIMEOUT_MS`     | Timeout for acquiring file lock.                                | `5000`                |
-| `TODOKIT_MAX_TODO_FILE_BYTES` | Maximum allowed size of the todo file.                          | `5242880` (5MB)       |
-| `TODOKIT_ALLOW_OUTSIDE_CWD`   | Allow storage file to be outside the current working directory. | `false`               |
+| Variable                          | Description                                                      | Default               |
+| --------------------------------- | ---------------------------------------------------------------- | --------------------- |
+| `TODOKIT_TODO_FILE`               | Absolute or relative path to the todo storage file.              | `todos.json` (in CWD) |
+| `TODOKIT_JSON_PRETTY`             | Set to `true` or `1` to indent JSON files with 2 spaces.         | `false` (compact)     |
+| `TODOKIT_TOOL_TIMEOUT_MS`         | Timeout for tool execution in milliseconds.                      | `60000`               |
+| `TODOKIT_LOCK_TIMEOUT_MS`         | Timeout for acquiring file lock.                                 | `5000`                |
+| `TODOKIT_MAX_TODO_FILE_BYTES`     | Maximum allowed size of the todo file.                           | `5242880` (5MB)       |
+| `TODOKIT_ALLOW_OUTSIDE_CWD`       | Allow storage file to be outside the current working directory.  | `false`               |
+| `TODOKIT_STRICT_PROTOCOL_VERSION` | Reject unsupported MCP protocol versions instead of negotiating. | `false`               |
 
 ## MCP Surface
 
 ### Tools
 
-| Tool            | Description                         | Parameters                                                                                       | Results                                            |
-| --------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `add_todo`      | Create a new task.                  | `description` (str, req), `priority` (enum, req), `category` (str, req), `dueAt` (iso-date, opt) | Returns the created item and summary.              |
-| `add_todos`     | Create multiple tasks in batch.     | `items` (array of todos, req, max 50)                                                            | Returns count and IDs of created items.            |
-| `list_todos`    | List tasks with optional filtering. | `status` (pending/completed/all, opt, def: pending)                                              | Returns list of items, counts, and status summary. |
-| `search_todos`  | Search for tasks.                   | `query` (str, req)                                                                               | Returns matching items.                            |
-| `update_todo`   | Update an existing task.            | `id` (str, req), `description`, `priority`, `category`, `dueAt` (all opt)                        | Returns updated item.                              |
-| `complete_todo` | Mark a task as completed.           | `id` (str, req)                                                                                  | Returns updated item.                              |
-| `delete_todo`   | Permanently remove a task.          | `id` (str, req)                                                                                  | Returns summary of deletion.                       |
+| Tool            | Description                         | Parameters                                                                                                             | Results                                                                    |
+| --------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `add_todo`      | Create a new task.                  | `description` (str, req), `priority` (enum, req), `category` (str, req), `dueAt` (iso-date, opt)                       | Returns the created item and summary.                                      |
+| `add_todos`     | Create multiple tasks in batch.     | `items` (array of todos, req, max 50)                                                                                  | Returns count and IDs of created items.                                    |
+| `list_todos`    | List tasks with optional filtering. | `status` (pending/completed/all, opt, def: pending), `limit` (1-100, opt, def: 50), `cursor` (opt)                     | Returns paginated items, counts, and `nextCursor` when more results exist. |
+| `search_todos`  | Search for tasks.                   | `query` (str, req), `status` (pending/completed/all, opt, def: pending), `limit` (1-100, opt, def: 50), `cursor` (opt) | Returns paginated matches and `nextCursor` when more results exist.        |
+| `update_todo`   | Update an existing task.            | `id` (str, req), `description`, `priority`, `category`, `dueAt` (all opt)                                              | Returns updated item.                                                      |
+| `complete_todo` | Mark a task as completed.           | `id` (str, req)                                                                                                        | Returns updated item.                                                      |
+| `delete_todo`   | Permanently remove a task.          | `id` (str, req)                                                                                                        | Returns summary of deletion.                                               |
 
 ### Resources
 
@@ -100,6 +101,12 @@ The server can be configured via CLI arguments or environment variables.
 | ------------------------- | ------------------ | ----------------------------------------------------------------- |
 | `internal://instructions` | `text/markdown`    | Returns usage instructions and context about the Todokit manager. |
 | `todo://list`             | `application/json` | Returns a live JSON list of all active (pending) todos.           |
+
+### Prompts
+
+| Prompt     | Description                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `get-help` | Returns the same operational guidance as `internal://instructions` for agents that prefer prompt workflows. |
 
 ## Client Configuration Examples
 

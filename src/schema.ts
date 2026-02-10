@@ -26,7 +26,7 @@ export interface Todo {
   completedAt?: string | undefined;
 }
 
-const TodoSchema: ZodType<Todo> = z.strictObject({
+export const TodoSchema: ZodType<Todo> = z.strictObject({
   id: z.string(),
   description: z.string(),
   completed: z.boolean(),
@@ -71,9 +71,29 @@ interface UpdateTodoInput {
 
 interface ListTodosFilterInput {
   status?: Status | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+}
+
+interface SearchTodosInput {
+  query: string;
+  status?: Status | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
 }
 
 const StatusSchema: ZodType<Status> = z.enum(['pending', 'completed', 'all']);
+const PaginationLimitSchema: ZodType<number> = z
+  .number()
+  .int()
+  .min(1)
+  .max(100)
+  .describe('Maximum number of items to return (1-100, default: 50)');
+const PaginationCursorSchema: ZodType<string> = z
+  .string()
+  .min(1)
+  .max(512)
+  .describe('Opaque pagination cursor returned by a previous response');
 
 const TodoInputSchema: ZodType<TodoInput> = z.strictObject({
   description: z.string().min(1).max(2000).describe('Description of the todo'),
@@ -128,14 +148,110 @@ export const ListTodosFilterSchema: ZodType<ListTodosFilterInput> =
     status: StatusSchema.optional().describe(
       'Filter by status: pending, completed, or all (default: pending). Results may be truncated for safety.'
     ),
+    limit: PaginationLimitSchema.optional(),
+    cursor: PaginationCursorSchema.optional(),
   });
 
-export const SearchTodosSchema = z.strictObject({
+export const SearchTodosSchema: ZodType<SearchTodosInput> = z.strictObject({
   query: z
     .string()
     .min(1)
     .max(100)
     .describe('Search query for description or category'),
+  status: StatusSchema.optional().describe(
+    'Filter matches by status: pending, completed, or all (default: pending).'
+  ),
+  limit: PaginationLimitSchema.optional(),
+  cursor: PaginationCursorSchema.optional(),
+});
+
+const CountsSchema = z.strictObject({
+  total: z.number().int().nonnegative(),
+  pending: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+});
+
+const NextActionsSchema = z.array(z.string().min(1).max(64)).min(1).max(10);
+
+export const AddTodoOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    item: TodoSchema,
+    summary: z.string(),
+    nextActions: NextActionsSchema,
+  }),
+});
+
+export const AddTodosOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    count: z.number().int().nonnegative(),
+    ids: z.array(z.string()).max(50),
+    summary: z.string(),
+    nextActions: NextActionsSchema,
+  }),
+});
+
+export const ListTodosOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    items: z.array(TodoSchema),
+    summary: z.string(),
+    counts: CountsSchema,
+    filteredCounts: CountsSchema,
+    status: StatusSchema,
+    returned: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    remaining: z.number().int().nonnegative(),
+    hint: z.string(),
+    limit: z.number().int().positive(),
+    hasMore: z.boolean(),
+    nextCursor: z.string().optional(),
+  }),
+});
+
+export const UpdateTodoOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    item: TodoSchema,
+    summary: z.string(),
+    nextActions: NextActionsSchema,
+  }),
+});
+
+export const CompleteTodoOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    item: TodoSchema,
+    summary: z.string(),
+    nextActions: NextActionsSchema,
+  }),
+});
+
+export const DeleteTodoOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    deletedIds: z.array(z.string()).min(1),
+    summary: z.string(),
+    nextActions: NextActionsSchema,
+  }),
+});
+
+export const SearchTodosOutputSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    items: z.array(TodoSchema),
+    query: z.string(),
+    status: StatusSchema,
+    summary: z.string(),
+    returned: z.number().int().nonnegative(),
+    totalMatches: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+    limit: z.number().int().positive(),
+    hasMore: z.boolean(),
+    nextCursor: z.string().optional(),
+    nextActions: NextActionsSchema,
+  }),
 });
 
 interface DefaultOutput {

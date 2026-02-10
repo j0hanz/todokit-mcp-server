@@ -6,10 +6,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import {
-  McpServer,
-  ResourceTemplate,
-} from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   ErrorCode,
@@ -17,7 +14,9 @@ import {
   InitializeRequestSchema,
   type InitializeResult,
   McpError,
+  SubscribeRequestSchema,
   SUPPORTED_PROTOCOL_VERSIONS,
+  UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import packageJson from '../package.json' with { type: 'json' };
@@ -141,6 +140,9 @@ const SERVER_VERSION =
     : '0.0.0';
 
 const DEFAULT_INSTRUCTIONS = 'Todokit to-do list manager';
+const HELP_PROMPT_NAME = 'get-help';
+const INSTRUCTIONS_RESOURCE_URI = 'internal://instructions';
+const TODO_LIST_RESOURCE_URI = 'todo://list';
 
 function resolvePackageRoot(): string {
   try {
@@ -178,6 +180,20 @@ function loadServerInstructions(): string {
   }
 
   return DEFAULT_INSTRUCTIONS;
+}
+
+function isTruthy(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return (
+    normalized === '1' ||
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === 'on'
+  );
+}
+
+function shouldUseStrictProtocolVersion(): boolean {
+  return isTruthy(process.env.TODOKIT_STRICT_PROTOCOL_VERSION);
 }
 
 function resolveIconPathCandidates(): string[] {
@@ -218,7 +234,7 @@ function registerInstructionsResource(
 ): void {
   server.registerResource(
     'internal://instructions',
-    new ResourceTemplate('internal://instructions', { list: undefined }),
+    INSTRUCTIONS_RESOURCE_URI,
     {
       title: 'Todokit Instructions',
       mimeType: 'text/markdown',
@@ -255,7 +271,7 @@ function registerTodoResource(
 ): void {
   server.registerResource(
     'todo://list',
-    new ResourceTemplate('todo://list', { list: undefined }),
+    TODO_LIST_RESOURCE_URI,
     {
       title: 'Active Todos',
       description: 'A live list of all active (pending) todos.',
@@ -285,6 +301,64 @@ function registerTodoResource(
       };
     }
   );
+}
+
+function registerHelpPrompt(
+  server: McpServer,
+  isInitialized: () => boolean
+): void {
+  server.registerPrompt(
+    HELP_PROMPT_NAME,
+    {
+      title: 'Todokit Help',
+      description:
+        'Returns concise usage instructions and best-practice workflows for Todokit tools.',
+    },
+    () => {
+      if (!isInitialized()) {
+        throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
+      }
+      return {
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: loadServerInstructions(),
+            },
+          },
+        ],
+      };
+    }
+  );
+}
+
+function registerResourceSubscriptionHandlers(
+  server: McpServer,
+  isInitialized: () => boolean,
+  subscriptions: Set<string>
+): void {
+  server.server.setRequestHandler(SubscribeRequestSchema, (request) => {
+    if (!isInitialized()) {
+      throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
+    }
+
+    const { uri } = request.params;
+    if (uri !== TODO_LIST_RESOURCE_URI && uri !== INSTRUCTIONS_RESOURCE_URI) {
+      throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+    }
+
+    subscriptions.add(uri);
+    return {};
+  });
+
+  server.server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+    if (!isInitialized()) {
+      throw new McpError(ErrorCode.InvalidRequest, 'Server not initialized');
+    }
+    subscriptions.delete(request.params.uri);
+    return {};
+  });
 }
 
 function installStrictInitializeHandler(server: McpServer): void {
@@ -327,6 +401,7 @@ let disableDiagnostics: (() => void) | null = null;
 export function createServer(): McpServer {
   let initialized = false;
   const isInitialized = (): boolean => initialized;
+  const resourceSubscriptions = new Set<string>();
 
   const localIcon = getLocalIconData();
 
@@ -346,14 +421,22 @@ export function createServer(): McpServer {
       instructions: loadServerInstructions(),
       capabilities: {
         logging: {},
-        resources: {},
+        resources: { subscribe: true },
       },
     }
   );
 
-  installStrictInitializeHandler(server);
+  if (shouldUseStrictProtocolVersion()) {
+    installStrictInitializeHandler(server);
+  }
   registerInstructionsResource(server, isInitialized, localIcon);
   registerTodoResource(server, isInitialized, localIcon);
+  registerHelpPrompt(server, isInitialized);
+  registerResourceSubscriptionHandlers(
+    server,
+    isInitialized,
+    resourceSubscriptions
+  );
 
   const previousInitialized = server.server.oninitialized;
   server.server.oninitialized = () => {
@@ -367,7 +450,16 @@ export function createServer(): McpServer {
   };
   setInitializationGuard(() => initialized);
 
-  registerAllTools(server, localIcon);
+  registerAllTools(server, localIcon, async () => {
+    if (!resourceSubscriptions.has(TODO_LIST_RESOURCE_URI)) return;
+    if (!server.isConnected()) return;
+
+    try {
+      await server.server.sendResourceUpdated({ uri: TODO_LIST_RESOURCE_URI });
+    } catch {
+      // Ignore notification delivery errors.
+    }
+  });
   return server;
 }
 

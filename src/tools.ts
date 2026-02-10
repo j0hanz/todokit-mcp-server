@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 
 import type {
@@ -31,14 +32,20 @@ import {
   getErrorMessage,
 } from './responses.js';
 import {
+  AddTodoOutputSchema,
   AddTodoSchema,
+  AddTodosOutputSchema,
   AddTodosSchema,
+  CompleteTodoOutputSchema,
   CompleteTodoSchema,
-  DefaultOutputSchema,
+  DeleteTodoOutputSchema,
   DeleteTodoSchema,
   ListTodosFilterSchema,
+  ListTodosOutputSchema,
+  SearchTodosOutputSchema,
   SearchTodosSchema,
   type Todo,
+  UpdateTodoOutputSchema,
   UpdateTodoSchema,
 } from './schema.js';
 import {
@@ -54,6 +61,19 @@ import {
 } from './storage.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 100;
+const CURSOR_VERSION = 1 as const;
+
+type CursorToolName = 'list_todos' | 'search_todos';
+
+interface PaginationCursorPayload {
+  v: typeof CURSOR_VERSION;
+  tool: CursorToolName;
+  status: ListTodoStatus;
+  offset: number;
+  query?: string | undefined;
+}
 
 let isInitialized = (): boolean => true;
 
@@ -196,6 +216,8 @@ interface ToolConfig<
   icons?: { src: string; mimeType: string; sizes?: string[] }[];
   _meta?: Record<string, unknown>;
 }
+
+type OnTodosChanged = () => Promise<void> | void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -354,6 +376,66 @@ function registerToolWithDiagnostics<
   return server.registerTool(name, config, createWrappedHandler(name, handler));
 }
 
+function resolvePageLimit(limit: number | undefined): number {
+  if (limit === undefined) return DEFAULT_PAGE_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1) return DEFAULT_PAGE_LIMIT;
+  return Math.min(MAX_PAGE_LIMIT, limit);
+}
+
+function encodeCursor(payload: PaginationCursorPayload): string {
+  const raw = JSON.stringify(payload);
+  return Buffer.from(raw, 'utf8').toString('base64url');
+}
+
+function decodeCursor(raw: string): PaginationCursorPayload | null {
+  try {
+    const json = Buffer.from(raw, 'base64url').toString('utf8');
+    const parsed: unknown = JSON.parse(json);
+    if (!isRecord(parsed)) return null;
+
+    const { v: version, tool, status, offset, query } = parsed;
+
+    if (version !== CURSOR_VERSION) return null;
+    if (tool !== 'list_todos' && tool !== 'search_todos') return null;
+    if (status !== 'pending' && status !== 'completed' && status !== 'all') {
+      return null;
+    }
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+      return null;
+    }
+    if (query !== undefined && typeof query !== 'string') return null;
+
+    return {
+      v: CURSOR_VERSION,
+      tool,
+      status,
+      offset,
+      query,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function validateCursor(
+  raw: string | undefined
+): PaginationCursorPayload | null {
+  if (!raw) return null;
+  if (raw.length > 512) return null;
+  return decodeCursor(raw);
+}
+
+async function notifyTodosChanged(
+  onTodosChanged?: OnTodosChanged
+): Promise<void> {
+  if (!onTodosChanged) return;
+  try {
+    await onTodosChanged();
+  } catch {
+    // Notification failures must not break tool results.
+  }
+}
+
 // ---------------------------
 // Handler: Add Item
 // ---------------------------
@@ -398,12 +480,12 @@ function buildAddTodosResponse(todos: Todo[]): CallToolResult {
 
 const addTodoToolConfig: ToolConfig<
   typeof AddTodoSchema,
-  typeof DefaultOutputSchema
+  typeof AddTodoOutputSchema
 > = {
   description:
     "Create a new task. Use this for single items. For multiple items, prefer 'add_todos' to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.",
   inputSchema: AddTodoSchema,
-  outputSchema: DefaultOutputSchema,
+  outputSchema: AddTodoOutputSchema,
   annotations: {
     readOnlyHint: false,
     idempotentHint: false,
@@ -412,7 +494,8 @@ const addTodoToolConfig: ToolConfig<
 
 async function handleAddTodo(
   input: AddTodoInput,
-  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  onTodosChanged?: OnTodosChanged
 ): Promise<CallToolResult> {
   const { description, priority, category, dueAt } = input;
 
@@ -421,13 +504,18 @@ async function handleAddTodo(
       [{ description, priority, category, dueAt }],
       extra.signal
     );
+    await notifyTodosChanged(onTodosChanged);
     return buildAddTodoResponse(requireSingleTodo(todos));
   } catch (error) {
     return createExecutionErrorResponse(error, 'E_ADD_TODO');
   }
 }
 
-function registerAddTodo(server: McpServer, serverIcon?: string): void {
+function registerAddTodo(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   registerToolWithDiagnostics(
     server,
     'add_todo',
@@ -441,7 +529,9 @@ function registerAddTodo(server: McpServer, serverIcon?: string): void {
           }
         : {}),
     },
-    handleAddTodo
+    async (input, extra) => {
+      return handleAddTodo(input, extra, onTodosChanged);
+    }
   );
 }
 
@@ -453,13 +543,13 @@ type AddTodosInput = z.infer<typeof AddTodosSchema>;
 
 const addTodosToolConfig: ToolConfig<
   typeof AddTodosSchema,
-  typeof DefaultOutputSchema
+  typeof AddTodosOutputSchema
 > = {
   title: 'Add Todos (Batch)',
   description:
     'Create multiple tasks in one call to save time. Note: the storage file is automatically deleted when all tasks are marked as completed.',
   inputSchema: AddTodosSchema,
-  outputSchema: DefaultOutputSchema,
+  outputSchema: AddTodosOutputSchema,
   annotations: {
     readOnlyHint: false,
     idempotentHint: false,
@@ -468,17 +558,23 @@ const addTodosToolConfig: ToolConfig<
 
 async function handleAddTodos(
   input: AddTodosInput,
-  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  onTodosChanged?: OnTodosChanged
 ): Promise<CallToolResult> {
   try {
     const todos = await addTodos(input.items, extra.signal);
+    await notifyTodosChanged(onTodosChanged);
     return buildAddTodosResponse(todos);
   } catch (error) {
     return createExecutionErrorResponse(error, 'E_ADD_TODOS');
   }
 }
 
-function registerAddTodos(server: McpServer, serverIcon?: string): void {
+function registerAddTodos(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   registerToolWithDiagnostics(
     server,
     'add_todos',
@@ -492,7 +588,9 @@ function registerAddTodos(server: McpServer, serverIcon?: string): void {
           }
         : {}),
     },
-    handleAddTodos
+    async (input, extra) => {
+      return handleAddTodos(input, extra, onTodosChanged);
+    }
   );
 }
 
@@ -522,18 +620,22 @@ function resolveStatus(status: ListTodosFilters['status']): ListTodoStatus {
   return status ?? 'pending';
 }
 
-function buildListHint(status: ListTodoStatus, remaining: number): string {
-  if (remaining <= 0) {
+function buildListHint(
+  status: ListTodoStatus,
+  remaining: number,
+  hasMore: boolean
+): string {
+  if (!hasMore || remaining <= 0) {
     return 'Tip: when all todos are completed, the storage file is automatically deleted.';
   }
   if (status === 'all') {
     return `...and ${String(
       remaining
-    )} more. Narrow the list by using status='pending' or status='completed', or operate by ID.`;
+    )} more. Use nextCursor to get the next page, or narrow by status='pending'/'completed'.`;
   }
   return `...and ${String(
     remaining
-  )} more. Use status='all' to include completed items, or operate by ID.`;
+  )} more. Use nextCursor to get the next page. Use status='all' to include completed items.`;
 }
 
 function buildListResponse(params: {
@@ -546,6 +648,9 @@ function buildListResponse(params: {
   remaining: number;
   summary: string;
   hint: string;
+  limit: number;
+  hasMore: boolean;
+  nextCursor?: string | undefined;
 }): CallToolResult {
   return createToolResponse({
     ok: true,
@@ -567,6 +672,11 @@ function buildListResponse(params: {
       truncated: params.truncated,
       remaining: params.remaining,
       hint: params.hint,
+      limit: params.limit,
+      hasMore: params.hasMore,
+      ...(params.nextCursor === undefined
+        ? {}
+        : { nextCursor: params.nextCursor }),
     },
   });
 }
@@ -585,29 +695,99 @@ function countTodo(
   if (todo.completed) counts.completed += 1;
 }
 
+type ListOffsetResolution =
+  | { ok: true; offset: number }
+  | { ok: false; response: CallToolResult };
+
+function resolveListOffset(
+  filters: ListTodosFilters,
+  status: ListTodoStatus,
+  total: number
+): ListOffsetResolution {
+  const cursor = validateCursor(filters.cursor);
+  if (filters.cursor && !cursor) {
+    return {
+      ok: false,
+      response: createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Invalid pagination cursor. Start with list_todos without a cursor.'
+      ),
+    };
+  }
+
+  if (!cursor) return { ok: true, offset: 0 };
+  if (cursor.tool !== 'list_todos') {
+    return {
+      ok: false,
+      response: createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Cursor does not belong to list_todos.'
+      ),
+    };
+  }
+  if (cursor.status !== status) {
+    return {
+      ok: false,
+      response: createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Cursor does not match the requested status filter.'
+      ),
+    };
+  }
+  if (cursor.offset > 0 && cursor.offset >= total) {
+    return {
+      ok: false,
+      response: createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Pagination cursor is out of range. Restart pagination without a cursor.'
+      ),
+    };
+  }
+  return { ok: true, offset: cursor.offset };
+}
+
+function buildListSummary(params: {
+  filteredTotal: number;
+  offset: number;
+  returned: number;
+  status: ListTodoStatus;
+  truncated: boolean;
+  counts: CountSummary;
+}): string {
+  if (params.filteredTotal === 0) {
+    return 'No todos found';
+  }
+
+  if (params.offset > 0 || params.truncated) {
+    return `Showing ${String(params.offset + 1)}-${String(params.offset + params.returned)} of ${String(
+      params.filteredTotal
+    )} ${params.status} todos (${buildSummary(params.counts)})`;
+  }
+
+  return `Showing ${String(params.filteredTotal)} ${params.status} todos (${buildSummary(
+    params.counts
+  )})`;
+}
+
 async function handleListTodos(
   filters: ListTodosFilters,
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
   const allTodos = await getTodos(extra.signal);
   const status = resolveStatus(filters.status);
-
-  const limit = 50;
-  const items: Todo[] = [];
+  const limit = resolvePageLimit(filters.limit);
 
   const totalCounts = { total: 0, completed: 0 };
-  const filteredCounts = { total: 0, completed: 0 };
-
   for (const todo of allTodos) {
     countTodo(todo, totalCounts);
+  }
 
-    if (!shouldIncludeTodo(todo, status)) continue;
-
-    countTodo(todo, filteredCounts);
-
-    if (items.length < limit) {
-      items.push(todo);
-    }
+  const filteredTodos = allTodos.filter((todo) =>
+    shouldIncludeTodo(todo, status)
+  );
+  const filteredCounts = { total: filteredTodos.length, completed: 0 };
+  for (const todo of filteredTodos) {
+    if (todo.completed) filteredCounts.completed += 1;
   }
 
   const counts: CountSummary = {
@@ -622,19 +802,38 @@ async function handleListTodos(
     pending: filteredCounts.total - filteredCounts.completed,
   };
 
-  const truncated = filtered.total > items.length;
-  const remaining = Math.max(0, filtered.total - items.length);
-
-  let summary: string;
-  if (filtered.total === 0) {
-    summary = 'No todos found';
-  } else if (truncated) {
-    summary = `Showing ${String(items.length)} of ${String(filtered.total)} ${status} todos (${buildSummary(
-      counts
-    )})`;
-  } else {
-    summary = `Showing ${String(filtered.total)} ${status} todos (${buildSummary(counts)})`;
+  const resolvedOffset = resolveListOffset(
+    filters,
+    status,
+    filteredTodos.length
+  );
+  if (!resolvedOffset.ok) {
+    return resolvedOffset.response;
   }
+  const { offset } = resolvedOffset;
+
+  const items = filteredTodos.slice(offset, offset + limit);
+  const nextOffset = offset + items.length;
+  const hasMore = nextOffset < filtered.total;
+  const remaining = Math.max(0, filtered.total - nextOffset);
+  const nextCursor = hasMore
+    ? encodeCursor({
+        v: CURSOR_VERSION,
+        tool: 'list_todos',
+        status,
+        offset: nextOffset,
+      })
+    : undefined;
+  const truncated = hasMore;
+
+  const summary = buildListSummary({
+    filteredTotal: filtered.total,
+    offset,
+    returned: items.length,
+    status,
+    truncated,
+    counts,
+  });
 
   return buildListResponse({
     items,
@@ -645,7 +844,10 @@ async function handleListTodos(
     truncated,
     remaining,
     summary,
-    hint: buildListHint(status, remaining),
+    hint: buildListHint(status, remaining, hasMore),
+    limit,
+    hasMore,
+    nextCursor,
   });
 }
 
@@ -656,9 +858,9 @@ function registerListTodos(server: McpServer, serverIcon?: string): void {
     {
       title: 'List Todos',
       description:
-        "List todos with an optional status filter. Default is status='pending' to keep responses short; use status='all' to include completed. Note: the storage file is automatically deleted when all tasks are marked as completed.",
+        "List todos with optional status filtering and cursor pagination. Default is status='pending' to keep responses short; use status='all' to include completed.",
       inputSchema: ListTodosFilterSchema,
-      outputSchema: DefaultOutputSchema,
+      outputSchema: ListTodosOutputSchema,
       annotations: {
         readOnlyHint: true,
         idempotentHint: true,
@@ -701,7 +903,8 @@ function buildUpdatePayload(input: UpdateTodoInput): UpdateFields | null {
 
 async function handleUpdateTodo(
   input: UpdateTodoInput,
-  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  onTodosChanged?: OnTodosChanged
 ): Promise<CallToolResult> {
   const outcome = await updateTodoById(
     input.id,
@@ -717,6 +920,7 @@ async function handleUpdateTodo(
     return createErrorResponse('E_BAD_REQUEST', 'No fields provided to update');
   }
 
+  await notifyTodosChanged(onTodosChanged);
   return createToolResponse({
     ok: true,
     result: {
@@ -727,7 +931,11 @@ async function handleUpdateTodo(
   });
 }
 
-function registerUpdateTodo(server: McpServer, serverIcon?: string): void {
+function registerUpdateTodo(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   registerToolWithDiagnostics(
     server,
     'update_todo',
@@ -735,7 +943,7 @@ function registerUpdateTodo(server: McpServer, serverIcon?: string): void {
       title: 'Update Todo',
       description: 'Update fields on a todo item',
       inputSchema: UpdateTodoSchema,
-      outputSchema: DefaultOutputSchema,
+      outputSchema: UpdateTodoOutputSchema,
       annotations: {
         readOnlyHint: false,
         idempotentHint: true,
@@ -750,7 +958,7 @@ function registerUpdateTodo(server: McpServer, serverIcon?: string): void {
     },
     async (input, extra) => {
       try {
-        return await handleUpdateTodo(input, extra);
+        return await handleUpdateTodo(input, extra, onTodosChanged);
       } catch (error) {
         return createExecutionErrorResponse(error, 'E_UPDATE_TODO');
       }
@@ -788,13 +996,21 @@ function buildOutcomeResponse(outcome: CompleteTodoOutcome): CallToolResult {
 
 async function handleCompleteTodo(
   input: CompleteTodoInput,
-  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  onTodosChanged?: OnTodosChanged
 ): Promise<CallToolResult> {
   const outcome = await completeTodoById(input.id, true, extra.signal);
+  if (outcome.kind !== 'error') {
+    await notifyTodosChanged(onTodosChanged);
+  }
   return buildOutcomeResponse(outcome);
 }
 
-function registerCompleteTodo(server: McpServer, serverIcon?: string): void {
+function registerCompleteTodo(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   registerToolWithDiagnostics(
     server,
     'complete_todo',
@@ -802,7 +1018,7 @@ function registerCompleteTodo(server: McpServer, serverIcon?: string): void {
       title: 'Complete Todo',
       description: 'Mark a todo as completed',
       inputSchema: CompleteTodoSchema,
-      outputSchema: DefaultOutputSchema,
+      outputSchema: CompleteTodoOutputSchema,
       annotations: {
         readOnlyHint: false,
         idempotentHint: true,
@@ -817,7 +1033,7 @@ function registerCompleteTodo(server: McpServer, serverIcon?: string): void {
     },
     async (input, extra) => {
       try {
-        return await handleCompleteTodo(input, extra);
+        return await handleCompleteTodo(input, extra, onTodosChanged);
       } catch (error) {
         return createExecutionErrorResponse(error, 'E_COMPLETE_TODO');
       }
@@ -844,7 +1060,8 @@ function buildDeleteResponse(todo: Todo): CallToolResult {
 
 async function handleDeleteTodo(
   input: DeleteTodoInput,
-  extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  onTodosChanged?: OnTodosChanged
 ): Promise<CallToolResult> {
   const outcome = await deleteTodoById(input.id, extra.signal);
 
@@ -852,10 +1069,15 @@ async function handleDeleteTodo(
     return outcome.response;
   }
 
+  await notifyTodosChanged(onTodosChanged);
   return buildDeleteResponse(outcome.todo);
 }
 
-function registerDeleteTodo(server: McpServer, serverIcon?: string): void {
+function registerDeleteTodo(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   registerToolWithDiagnostics(
     server,
     'delete_todo',
@@ -863,7 +1085,7 @@ function registerDeleteTodo(server: McpServer, serverIcon?: string): void {
       title: 'Delete Todo',
       description: 'Delete a todo item by ID',
       inputSchema: DeleteTodoSchema,
-      outputSchema: DefaultOutputSchema,
+      outputSchema: DeleteTodoOutputSchema,
       annotations: {
         readOnlyHint: false,
         idempotentHint: false,
@@ -879,7 +1101,7 @@ function registerDeleteTodo(server: McpServer, serverIcon?: string): void {
     },
     async (input, extra) => {
       try {
-        return await handleDeleteTodo(input, extra);
+        return await handleDeleteTodo(input, extra, onTodosChanged);
       } catch (error) {
         return createExecutionErrorResponse(error, 'E_DELETE_TODO');
       }
@@ -898,24 +1120,94 @@ async function handleSearchTodos(
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>
 ): Promise<CallToolResult> {
   const { query } = input;
-  const todos = await searchTodos(query, extra.signal);
+  const status = resolveStatus(input.status);
+  const limit = resolvePageLimit(input.limit);
+  const cursor = validateCursor(input.cursor);
 
-  if (todos.length === 0) {
+  if (input.cursor && !cursor) {
+    return createErrorResponse(
+      'E_INVALID_PARAMS',
+      'Invalid pagination cursor. Start with search_todos without a cursor.'
+    );
+  }
+
+  if (cursor) {
+    if (cursor.tool !== 'search_todos') {
+      return createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Cursor does not belong to search_todos.'
+      );
+    }
+    if (cursor.status !== status || cursor.query !== query) {
+      return createErrorResponse(
+        'E_INVALID_PARAMS',
+        'Cursor does not match the current search query and status.'
+      );
+    }
+  }
+
+  const matches = (await searchTodos(query, extra.signal)).filter((todo) =>
+    shouldIncludeTodo(todo, status)
+  );
+
+  const offset = cursor?.offset ?? 0;
+  if (offset > 0 && offset >= matches.length) {
+    return createErrorResponse(
+      'E_INVALID_PARAMS',
+      'Pagination cursor is out of range. Restart search without a cursor.'
+    );
+  }
+
+  const items = matches.slice(offset, offset + limit);
+  const nextOffset = offset + items.length;
+  const hasMore = nextOffset < matches.length;
+  const remaining = Math.max(0, matches.length - nextOffset);
+  const nextCursor = hasMore
+    ? encodeCursor({
+        v: CURSOR_VERSION,
+        tool: 'search_todos',
+        status,
+        query,
+        offset: nextOffset,
+      })
+    : undefined;
+
+  if (matches.length === 0) {
     return createToolResponse({
       ok: true,
       result: {
         items: [],
+        query,
+        status,
         summary: `No todos found matching "${query}"`,
+        returned: 0,
+        totalMatches: 0,
+        remaining: 0,
+        limit,
+        hasMore: false,
         nextActions: ['list_todos', 'add_todo'],
       },
     });
   }
 
+  const summary =
+    offset > 0 || hasMore
+      ? `Showing ${String(offset + 1)}-${String(offset + items.length)} of ${String(matches.length)} matches for "${query}" (${status})`
+      : `Found ${matches.length} matches for "${query}" (${status})`;
+
   return createToolResponse({
     ok: true,
     result: {
-      items: todos,
-      summary: `Found ${todos.length} matches for "${query}"`,
+      items,
+      query,
+      status,
+      summary,
+      returned: items.length,
+      totalMatches: matches.length,
+      remaining,
+      limit,
+      hasMore,
+      ...(nextCursor === undefined ? {} : { nextCursor }),
       nextActions: ['update_todo', 'complete_todo'],
     },
   });
@@ -927,9 +1219,10 @@ function registerSearchTodos(server: McpServer, serverIcon?: string): void {
     'search_todos',
     {
       title: 'Search Todos',
-      description: 'Search for todos by description or category.',
+      description:
+        "Search todos by description or category. Supports status filtering and cursor pagination. Default status is 'pending'.",
       inputSchema: SearchTodosSchema,
-      outputSchema: DefaultOutputSchema,
+      outputSchema: SearchTodosOutputSchema,
       annotations: {
         readOnlyHint: true,
         idempotentHint: true,
@@ -954,7 +1247,8 @@ function registerSearchTodos(server: McpServer, serverIcon?: string): void {
 
 const TOOL_REGISTRATIONS: readonly ((
   server: McpServer,
-  serverIcon?: string
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
 ) => void)[] = [
   registerAddTodo,
   registerAddTodos,
@@ -965,8 +1259,12 @@ const TOOL_REGISTRATIONS: readonly ((
   registerSearchTodos,
 ];
 
-export function registerAllTools(server: McpServer, serverIcon?: string): void {
+export function registerAllTools(
+  server: McpServer,
+  serverIcon?: string,
+  onTodosChanged?: OnTodosChanged
+): void {
   TOOL_REGISTRATIONS.forEach((register) => {
-    register(server, serverIcon);
+    register(server, serverIcon, onTodosChanged);
   });
 }

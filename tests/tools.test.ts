@@ -130,6 +130,7 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       'add_todo',
       'add_todos',
       'list_todos',
+      'search_todos',
       'update_todo',
       'complete_todo',
       'delete_todo',
@@ -270,6 +271,52 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
       pending: 0,
       completed: 0,
     });
+  });
+
+  it('paginates list_todos with cursor and limit', async () => {
+    const { server, getHandler } = createToolHarness();
+    registerAllTools(server);
+
+    await addTodos([
+      {
+        description: 'Page item 1',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Page item 2',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+      {
+        description: 'Page item 3',
+        priority: DEFAULT_PRIORITY,
+        category: DEFAULT_CATEGORY,
+      },
+    ]);
+
+    const listHandler = getHandler<{
+      status?: 'pending' | 'completed' | 'all';
+      limit?: number;
+      cursor?: string;
+    }>('list_todos');
+
+    const page1 = await listHandler({ limit: 2 });
+    const page1Result = getStructured(page1)?.result as Record<string, unknown>;
+    const page1Items = page1Result.items as { description: string }[];
+    const nextCursor = page1Result.nextCursor as string | undefined;
+
+    assert.equal(page1Items.length, 2);
+    assert.equal(page1Result.hasMore, true);
+    assert.equal(typeof nextCursor, 'string');
+
+    const page2 = await listHandler({ limit: 2, cursor: nextCursor });
+    const page2Result = getStructured(page2)?.result as Record<string, unknown>;
+    const page2Items = page2Result.items as { description: string }[];
+
+    assert.equal(page2Items.length, 1);
+    assert.equal(page2Result.hasMore, false);
+    assert.equal(page2Result.nextCursor, undefined);
   });
 
   it('filters by completed status', async () => {
@@ -483,5 +530,46 @@ describe('tool handlers', { timeout: TEST_TIMEOUT_MS }, () => {
         config.annotations.idempotentHint,
       false
     );
+  });
+
+  it('invokes onTodosChanged callback for mutating operations', async () => {
+    const { server, getHandler } = createToolHarness();
+    let notifications = 0;
+    registerAllTools(server, undefined, async () => {
+      notifications += 1;
+    });
+
+    const addHandler = getHandler<{
+      description: string;
+      priority: typeof DEFAULT_PRIORITY;
+      category: typeof DEFAULT_CATEGORY;
+    }>('add_todo');
+    const addResult = await addHandler({
+      description: 'Notify test',
+      priority: DEFAULT_PRIORITY,
+      category: DEFAULT_CATEGORY,
+    });
+    const added = (getStructured(addResult)?.result as { item: { id: string } })
+      .item;
+    const guardResult = await addHandler({
+      description: 'Keep one pending for notification assertions',
+      priority: DEFAULT_PRIORITY,
+      category: DEFAULT_CATEGORY,
+    });
+    assert.equal(getStructured(guardResult)?.ok, true);
+
+    const updateHandler = getHandler<{
+      id: string;
+      description?: string;
+    }>('update_todo');
+    await updateHandler({ id: added.id, description: 'Notify updated' });
+
+    const completeHandler = getHandler<{ id: string }>('complete_todo');
+    await completeHandler({ id: added.id });
+
+    const deleteHandler = getHandler<{ id: string }>('delete_todo');
+    await deleteHandler({ id: added.id });
+
+    assert.equal(notifications >= 5, true);
   });
 });

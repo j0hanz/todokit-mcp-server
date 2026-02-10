@@ -30,8 +30,13 @@ _Do NOT repeat JSON schema. Focus on behavior and pitfalls._
 
 - **`list_todos`**
   - **Purpose:** List todos with optional status filtering.
-  - **Inputs:** `status` ('pending'|'completed'|'all', default 'pending').
-  - **Limits:** Returns max 50 items; pagination not supported (use status filter).
+  - **Inputs:** `status` ('pending'|'completed'|'all', default 'pending'), `limit` (1-100), `cursor` (opaque).
+  - **Pagination:** Use the returned `nextCursor` to fetch the next page.
+
+- **`search_todos`**
+  - **Purpose:** Search by description/category with optional status filtering.
+  - **Inputs:** `query`, optional `status`, optional `limit`, optional `cursor`.
+  - **Pagination:** Use the returned `nextCursor` to continue a search.
 
 - **`add_todos`**
   - **Purpose:** Create multiple tasks in one batch (preferred over `add_todo`).

@@ -37,6 +37,7 @@
     "lint:fix": "eslint . --fix",
     "test": "node scripts/tasks.mjs test",
     "test:coverage": "node scripts/tasks.mjs test --coverage",
+    "dup-check": "jscpd --config .jscpd.json",
     "knip": "knip",
     "knip:fix": "knip --fix",
     "inspector": "npx @modelcontextprotocol/inspector",

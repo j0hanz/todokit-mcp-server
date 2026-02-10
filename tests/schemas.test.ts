@@ -5,6 +5,9 @@ import {
   AddTodoSchema,
   DefaultOutputSchema,
   DeleteTodoSchema,
+  ListTodosFilterSchema,
+  ListTodosOutputSchema,
+  SearchTodosSchema,
   TodosSchema,
   UpdateTodoSchema,
 } from '../src/schema.js';
@@ -109,5 +112,59 @@ describe('schemas', { timeout: TEST_TIMEOUT_MS }, () => {
       }).success,
       false
     );
+  });
+
+  it('validates pagination fields for list_todos', () => {
+    assert.equal(
+      ListTodosFilterSchema.safeParse({
+        status: 'all',
+        limit: 25,
+        cursor: 'opaque-cursor',
+      }).success,
+      true
+    );
+    assert.equal(ListTodosFilterSchema.safeParse({ limit: 0 }).success, false);
+    assert.equal(
+      ListTodosFilterSchema.safeParse({ cursor: '' }).success,
+      false
+    );
+  });
+
+  it('validates search_todos status and pagination fields', () => {
+    assert.equal(
+      SearchTodosSchema.safeParse({
+        query: 'release',
+        status: 'pending',
+        limit: 10,
+      }).success,
+      true
+    );
+    assert.equal(
+      SearchTodosSchema.safeParse({
+        query: 'release',
+        status: 'invalid',
+      }).success,
+      false
+    );
+  });
+
+  it('validates list output schema with pagination fields', () => {
+    const result = ListTodosOutputSchema.safeParse({
+      ok: true,
+      result: {
+        items: [],
+        summary: 'No todos found',
+        counts: { total: 0, pending: 0, completed: 0 },
+        filteredCounts: { total: 0, pending: 0, completed: 0 },
+        status: 'pending',
+        returned: 0,
+        truncated: false,
+        remaining: 0,
+        hint: 'Tip',
+        limit: 50,
+        hasMore: false,
+      },
+    });
+    assert.equal(result.success, true);
   });
 });
