@@ -461,6 +461,7 @@ class LockFileManager implements LockPort {
     const lockPath = `${path}.lock`;
     const started = nowMs();
     const lockContent = `${String(process.pid)} ${new Date().toISOString()} ${randomUUID()}${EOL}`;
+    let attempt = 0;
 
     await mkdir(dirname(path), { recursive: true });
 
@@ -497,7 +498,9 @@ class LockFileManager implements LockPort {
           );
         }
 
-        await sleep(25, signal);
+        const backoffMs = Math.min(500, 10 * Math.pow(1.5, attempt));
+        attempt++;
+        await sleep(backoffMs, signal);
       }
     }
   }
@@ -1097,10 +1100,7 @@ class TodoRepository {
   private hasChanges(current: Todo, updates: TodoUpdate): boolean {
     return Object.entries(updates).some(([key, value]) => {
       if (!Object.prototype.hasOwnProperty.call(current, key)) return true;
-      return !Object.is(
-        (current as unknown as Record<string, unknown>)[key],
-        value
-      );
+      return !Object.is(current[key as keyof Todo], value);
     });
   }
 
