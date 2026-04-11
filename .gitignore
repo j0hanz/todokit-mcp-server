@@ -29,6 +29,7 @@ logs/
 
 # Editor directories and files
 .github/*
+.agents/
 !.github/workflows/
 .vscode/*
 !.vscode/extensions.json
